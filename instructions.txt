@@ -1,0 +1,225 @@
+Here is the step-by-step guide to building your standalone, click-to-run launcher.
+
+---
+
+### Step 1: Set Up Your Project Directory
+
+Create a primary working folder on your computer named **`BibliometrixLauncher`**. All files created in the following steps will live inside this root folder.
+
+---
+
+### Step 2: Download & Configure R-Portable
+
+Non-technical users will not have R installed, so you must bundle a self-contained R engine.
+
+1. Download **R-Portable** (available on SourceForge).
+2. Extract the downloaded folder into your `BibliometrixLauncher` directory so you have a subfolder named **`R-Portable`**.
+3. Open the command prompt in Windows and run the portable R executable directly to pre-install basic packages:
+```cmd
+.\R-Portable\App\R-Portable\bin\R.exe
+
+```
+
+
+4. Inside the R terminal that opens, run the following command to pre-install `pak` (which safely handles GitHub downloads without requiring local compilation tools like RTools):
+```R
+install.packages("pak", repos = "https://cloud.r-project.org")
+q()
+
+```
+
+
+
+---
+
+### Step 3: Create `launch_app.R`
+
+Create a file named **`launch_app.R`** inside the `BibliometrixLauncher` directory.
+
+This script checks Massimo's GitHub repository for the latest `bibliometrix` code, updates it if online, and starts `biblioshiny` in the default browser.
+
+```R
+# launch_app.R
+
+# 1. Ensure pak is loaded for GitHub installation
+if (!requireNamespace("pak", quietly = TRUE)) {
+  install.packages("pak", repos = "https://cloud.r-project.org")
+}
+
+# 2. Update Bibliometrix directly from Massimo's GitHub repository
+message("Checking for Bibliometrix updates...")
+tryCatch({
+  pak::pkg_install("massimoaria/bibliometrix", upgrade = TRUE, ask = FALSE)
+}, error = function(e) {
+  message("Offline or unable to fetch updates. Launching existing installed version...")
+})
+
+# 3. Force Shiny to open in the user's default web browser
+options(shiny.launch.browser = TRUE)
+
+# 4. Run Bibliometrix
+library(bibliometrix)
+bibliometrix::biblioshiny()
+
+```
+
+---
+
+### Step 4: Create `version.txt`
+
+Create a plain text file named **`version.txt`** inside the `BibliometrixLauncher` directory.
+
+This file will be pushed to your public GitHub repository so your executable can check if a new version of *your launcher* is available.
+
+```text
+1.0.0
+
+```
+
+---
+
+### Step 5: Create `run_bibliometrix.py`
+
+Create a file named **`run_bibliometrix.py`** inside the `BibliometrixLauncher` directory.
+
+This Python script performs a version check against your GitHub repo, locates the portable R environment, and silently starts `launch_app.R`.
+
+```python
+# run_bibliometrix.py
+import os
+import sys
+import subprocess
+import requests
+
+# Set this to the Raw URL of version.txt in YOUR public GitHub repository
+GITHUB_VERSION_URL = "https://raw.githubusercontent.com/YourUsername/YourRepo/main/version.txt"
+CURRENT_VERSION = "1.0.0"
+
+def get_base_dir():
+    """Finds directory path whether running as .py or compiled .exe"""
+    if getattr(sys, 'frozen', False):
+        return os.path.dirname(sys.executable)
+    return os.path.dirname(os.path.abspath(__file__))
+
+def check_for_wrapper_updates():
+    """Checks your GitHub repository for updates to your launcher"""
+    try:
+        response = requests.get(GITHUB_VERSION_URL, timeout=3)
+        if response.status_code == 200:
+            latest = response.text.strip()
+            if latest != CURRENT_VERSION:
+                print(f"Notice: Version {latest} of this launcher is available on GitHub.")
+    except Exception:
+        pass # Silently continue if user is offline
+
+def start_application():
+    base_dir = get_base_dir()
+    
+    # Locate Rscript.exe within the portable folder structure
+    rscript_path = os.path.join(base_dir, "R-Portable", "App", "R-Portable", "bin", "Rscript.exe")
+    if not os.path.exists(rscript_path):
+        rscript_path = os.path.join(base_dir, "R-Portable", "bin", "Rscript.exe")
+
+    r_script = os.path.join(base_dir, "launch_app.R")
+
+    if not os.path.exists(rscript_path):
+        print(f"Error: R-Portable path not found at {rscript_path}")
+        input("Press Enter to exit...")
+        sys.exit(1)
+
+    # Hide command prompt window on Windows when starting R
+    startupinfo = None
+    if sys.platform == "win32":
+        startupinfo = subprocess.STARTUPINFO()
+        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+
+    subprocess.run([rscript_path, r_script], startupinfo=startupinfo)
+
+if __name__ == "__main__":
+    check_for_wrapper_updates()
+    start_application()
+
+```
+
+---
+
+### Step 6: Compile `run_bibliometrix.exe`
+
+1. Install PyInstaller in your terminal:
+```bash
+pip install pyinstaller requests
+
+```
+
+
+2. Run PyInstaller inside your `BibliometrixLauncher` directory:
+```bash
+pyinstaller --onefile --noconsole run_bibliometrix.py
+
+```
+
+
+3. PyInstaller will generate a `dist` folder containing **`run_bibliometrix.exe`**. Move `run_bibliometrix.exe` out of `dist` and place it directly into your root `BibliometrixLauncher` folder.
+
+---
+
+### Step 7: Create `installer_config.iss` (Installer Creation)
+
+To distribute this easily to non-technical users, create an **Inno Setup** script named **`installer_config.iss`** inside your `BibliometrixLauncher` directory.
+
+*(Requires [Inno Setup](https://jrsoftware.org/isinfo.php) installed on your machine).*
+
+```iss
+; installer_config.iss
+
+[Setup]
+AppName=Bibliometrix Desktop
+AppVersion=1.0.0
+DefaultDirName={autopf}\Bibliometrix Desktop
+DefaultGroupName=Bibliometrix Desktop
+OutputDir=Output
+OutputBaseFilename=BibliometrixSetup
+Compression=lzma
+SolidCompression=yes
+
+[Tasks]
+Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
+
+[Files]
+Source: "run_bibliometrix.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "launch_app.R"; DestDir: "{app}"; Flags: ignoreversion
+Source: "R-Portable\*"; DestDir: "{app}\R-Portable"; Flags: ignoreversion recursesubdirs createallsubdirs
+
+[Icons]
+Name: "{autoprograms}\Bibliometrix Desktop"; Filename: "{app}\run_bibliometrix.exe"
+Name: "{autodesktop}\Bibliometrix Desktop"; Filename: "{app}\run_bibliometrix.exe"; Tasks: desktopicon
+
+```
+
+1. Open `installer_config.iss` in Inno Setup and click **Compile**.
+2. It will generate a single file in an `Output` folder named **`BibliometrixSetup.exe`**.
+
+---
+
+### Final Project Directory Overview
+
+Your root repository folder structure will look like this:
+
+```text
+BibliometrixLauncher/
+├── R-Portable/            (Portable R installation folder)
+├── Output/
+│   └── BibliometrixSetup.exe (The installer file you share with end users)
+├── installer_config.iss   (Inno Setup compiler script)
+├── launch_app.R           (Script fetching from massimoaria/bibliometrix)
+├── run_bibliometrix.exe   (Executable compiled from Python script)
+├── run_bibliometrix.py    (Python launcher source file)
+└── version.txt            (Version marker for your public GitHub repo updates)
+
+```
+
+### End-User Experience
+
+1. User downloads and runs `BibliometrixSetup.exe`.
+2. A desktop icon labeled **Bibliometrix Desktop** is created.
+3. When double-clicked, `run_bibliometrix.exe` checks your GitHub repo for launcher updates, uses `launch_app.R` to check Massimo's GitHub repo for package updates, and automatically opens `biblioshiny` inside Edge, Chrome, or Firefox.
