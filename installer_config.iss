@@ -65,3 +65,9 @@ Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilen
 
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#MyAppName}}"; Flags: nowait postinstall skipifsilent
+
+; Remove runtime-created data that Inno did not install (CRAN updates, logs).
+[UninstallDelete]
+Type: filesandordirs; Name: "{app}\R_library"
+Type: files; Name: "{app}\launcher.log"
+Type: dirifempty; Name: "{app}"

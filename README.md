@@ -16,6 +16,22 @@ Bibliometrix is excellent for bibliometric analysis, but installing R, package d
 
 Logs (if something goes wrong) are written to `%LOCALAPPDATA%\Bibliometrix Desktop\launcher.log`.
 
+### If Windows blocks the installer
+
+Windows SmartScreen (and some browsers or antivirus tools) may warn that the app is from an “unknown publisher.” That is common for new, unsigned open-source installers and does **not** mean the file is malware.
+
+**SmartScreen (“Windows protected your PC”):**
+
+1. Click **More info**.
+2. Click **Run anyway**.
+
+**Microsoft Edge / Chrome download warning:**
+
+1. Open the browser’s downloads list.
+2. Choose **Keep** / **Keep anyway** (Edge may ask you to confirm under the **…** menu).
+
+Only install builds downloaded from the official [GitHub Releases](https://github.com/ecksteing/bibliometrix-desktop/releases) page for this project. If your organisation’s antivirus still blocks the file, ask IT to allowlist it, or open a [GitHub Issue](https://github.com/ecksteing/bibliometrix-desktop/issues).
+
 ## FAQ
 
 #### Do I need to install R, Rtools, or Shiny?
