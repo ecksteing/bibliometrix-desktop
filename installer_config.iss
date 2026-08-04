@@ -41,8 +41,9 @@ VersionInfoVersion={#MyAppVersion}.0
 VersionInfoCompany={#MyAppPublisher}
 VersionInfoDescription={#MyAppName} Setup
 VersionInfoProductName={#MyAppName}
-CloseApplications=yes
+CloseApplications=force
 RestartIfNeededByRun=no
+UninstallDisplayName={#MyAppName}
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
@@ -66,8 +67,7 @@ Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilen
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#MyAppName}}"; Flags: nowait postinstall skipifsilent
 
-; Remove runtime-created data that Inno did not install (CRAN updates, logs).
+; Remove the entire install folder, including runtime data Inno did not install
+; (CRAN updates in R_library, launcher.log, and any other leftovers).
 [UninstallDelete]
-Type: filesandordirs; Name: "{app}\R_library"
-Type: files; Name: "{app}\launcher.log"
-Type: dirifempty; Name: "{app}"
+Type: filesandordirs; Name: "{app}"
