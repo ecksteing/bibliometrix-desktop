@@ -1,0 +1,14 @@
+pmApi2df                Convert xml PubMed bibliographic data into a
+                        dataframe
+pmApiRequest            Gather bibliographic content from PubMed
+                        database using NCBI entrez APIs
+pmCitedBy               Find articles that cite a given PubMed article
+pmCollect               Collect and process PubMed bibliographic data
+                        in one step
+pmEnrichCitations       Enrich a PubMed dataframe with citation data
+pmExtractReferences     Extract references from PubMed XML records
+pmFetchById             Fetch PubMed records by PMID
+pmQueryBuild            Build a PubMed search query programmatically
+pmQueryTotalCount       Count the number of documents returned by a
+                        query
+pmReferences            Find references cited by a given PubMed article

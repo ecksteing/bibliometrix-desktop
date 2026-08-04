@@ -1,0 +1,10 @@
+# Portable R configuration
+# All packages install to the local library/ directory
+.libPaths(.Library)
+
+# Suppress the default CRAN mirror prompt
+local({
+  r <- getOption("repos")
+  r["CRAN"] <- "https://cloud.r-project.org"
+  options(repos = r)
+})

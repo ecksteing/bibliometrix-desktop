@@ -1,0 +1,32 @@
+# Build / packaging outputs
+Output/
+build/
+dist/
+*.spec
+*.exe
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+
+# Local logs and user libraries (created at runtime)
+*.log
+
+# Optional: keep R-Portable out of git once you rely on bake/build scripts.
+# Uncomment after removing R-Portable from git tracking:
+# R-Portable/
+
+# OS / editor
+Thumbs.db
+Desktop.ini
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Temporary docs
+instructions.docx
+instructions.txt
