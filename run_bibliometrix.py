@@ -4,9 +4,11 @@
 from __future__ import annotations
 
 import os
+import socket
 import sys
 import subprocess
 import traceback
+import webbrowser
 from datetime import datetime
 from pathlib import Path
 from urllib.error import URLError, HTTPError
@@ -17,6 +19,8 @@ GITHUB_VERSION_URL = (
 )
 RELEASES_URL = "https://github.com/ecksteing/bibliometrix-desktop/releases"
 APP_NAME = "Bibliometrix Desktop"
+SHINY_HOST = "127.0.0.1"
+SHINY_PORT = 3838
 
 
 def get_base_dir() -> Path:
@@ -107,6 +111,111 @@ def check_for_wrapper_updates(current_version: str) -> None:
         log("Update check skipped (offline or unavailable).")
 
 
+def shiny_url(port: int = SHINY_PORT) -> str:
+    return f"http://{SHINY_HOST}:{port}"
+
+
+def port_is_listening(port: int = SHINY_PORT) -> bool:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.settimeout(0.5)
+        return sock.connect_ex((SHINY_HOST, port)) == 0
+
+
+def shiny_http_reachable(port: int = SHINY_PORT) -> bool:
+    try:
+        with urlopen(shiny_url(port), timeout=1.5) as response:
+            return 200 <= getattr(response, "status", 200) < 500
+    except Exception:
+        return False
+
+
+def open_shiny_in_browser(port: int = SHINY_PORT) -> None:
+    webbrowser.open(shiny_url(port))
+
+
+def _creationflags_no_window() -> int:
+    if sys.platform == "win32":
+        return getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    return 0
+
+
+def pids_listening_on_port(port: int = SHINY_PORT) -> set[int]:
+    """Return PIDs with a TCP LISTENING socket on port (Windows)."""
+    if sys.platform != "win32":
+        return set()
+    try:
+        output = subprocess.check_output(
+            ["netstat", "-ano", "-p", "TCP"],
+            text=True,
+            errors="replace",
+            creationflags=_creationflags_no_window(),
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return set()
+
+    suffix = f":{port}"
+    pids: set[int] = set()
+    for line in output.splitlines():
+        if "LISTENING" not in line:
+            continue
+        parts = line.split()
+        # Expect: Proto LocalAddress ForeignAddress State PID
+        if len(parts) < 5:
+            continue
+        local_addr = parts[1]
+        # Match 127.0.0.1:3838 or 0.0.0.0:3838, not :38380.
+        if not local_addr.endswith(suffix):
+            continue
+        # Ensure exact port: character before port must be ':' already in suffix.
+        try:
+            pids.add(int(parts[-1]))
+        except ValueError:
+            continue
+    return pids
+
+
+def kill_pids(pids: set[int]) -> None:
+    for pid in sorted(pids):
+        if pid <= 0:
+            continue
+        log(f"Stopping process PID {pid} holding the Biblioshiny port.")
+        try:
+            if sys.platform == "win32":
+                subprocess.run(
+                    ["taskkill", "/PID", str(pid), "/T", "/F"],
+                    capture_output=True,
+                    text=True,
+                    creationflags=_creationflags_no_window(),
+                )
+            else:
+                os.kill(pid, 15)
+        except OSError as exc:
+            log(f"Could not stop PID {pid}: {exc}")
+
+
+def prepare_shiny_port(port: int = SHINY_PORT) -> bool:
+    """
+    If Biblioshiny is already running, reopen the browser and return True
+    (caller should exit). Otherwise free a stuck port if needed and return False.
+    """
+    if shiny_http_reachable(port):
+        log(f"Biblioshiny already running at {shiny_url(port)}; reopening browser.")
+        open_shiny_in_browser(port)
+        return True
+
+    if port_is_listening(port):
+        log(f"Port {port} is in use but Biblioshiny is not responding; freeing it.")
+        kill_pids(pids_listening_on_port(port))
+        # Brief pause so Windows releases the socket.
+        try:
+            import time
+
+            time.sleep(1.0)
+        except Exception:
+            pass
+    return False
+
+
 def find_rscript(base_dir: Path) -> Path | None:
     if sys.platform == "win32":
         candidates = [
@@ -153,6 +262,8 @@ def start_application(base_dir: Path) -> int:
     # Prefer the writable user library for updates without needing admin rights.
     existing = env.get("R_LIBS", "")
     env["R_LIBS"] = user_lib if not existing else f"{user_lib}{os.pathsep}{existing}"
+    env["BIBDESK_SHINY_HOST"] = SHINY_HOST
+    env["BIBDESK_SHINY_PORT"] = str(SHINY_PORT)
 
     creationflags = 0
     startupinfo = None
@@ -193,13 +304,11 @@ def start_application(base_dir: Path) -> int:
             log_text = log_path().read_text(encoding="utf-8", errors="replace")
         except OSError:
             log_text = ""
-        session_marker = (
-            f"----- R session "
-        )
-        # Only inspect the latest R session chunk when possible.
+        session_marker = "----- R session "
         latest = log_text.rsplit(session_marker, 1)[-1] if session_marker in log_text else log_text
         started = "Listening on http://" in latest or "Starting Biblioshiny..." in latest
-        if started:
+        failed_bind = "address already in use" in latest or "Failed to create server" in latest
+        if started and not failed_bind:
             log(
                 f"R exited with code {result.returncode} after Biblioshiny started; "
                 "treating as a normal shutdown."
@@ -223,6 +332,11 @@ def main() -> int:
     current_version = get_local_version(base_dir)
     log(f"Launcher start version={current_version} base_dir={base_dir}")
     check_for_wrapper_updates(current_version)
+
+    # Closing the browser tab does not stop Shiny; reopen or free port 3838.
+    if prepare_shiny_port(SHINY_PORT):
+        return 0
+
     return start_application(base_dir)
 
 

@@ -137,10 +137,22 @@ ensure_bibliometrix_installed()
 message("Using bibliometrix ", installed_bibliometrix_version())
 
 message("Starting Biblioshiny...")
+host <- Sys.getenv("BIBDESK_SHINY_HOST", unset = "127.0.0.1")
+port <- suppressWarnings(as.integer(Sys.getenv("BIBDESK_SHINY_PORT", unset = "3838")))
+if (is.na(port) || port <= 0) {
+  port <- 3838L
+}
+
 # Shiny often ends by throwing when the user closes the app; treat that as success.
+# Note: closing the browser tab does NOT stop the server — relaunching the desktop
+# app reopens the existing session (handled by run_bibliometrix.py).
 tryCatch(
   {
-    bibliometrix::biblioshiny()
+    bibliometrix::biblioshiny(
+      host = host,
+      port = port,
+      launch.browser = TRUE
+    )
   },
   error = function(e) {
     message("Biblioshiny stopped: ", conditionMessage(e))
