@@ -6,6 +6,10 @@
 #   - Never installs from GitHub (source builds often need Rtools)
 #   - Newer packages install into a writable user library and take precedence
 #   - If offline / update fails, the baked-in copy still launches
+#
+# Lifecycle:
+#   Closing the browser session stops the Shiny server (after a short delay),
+#   so R does not keep locking files after the user is done.
 
 cran_repo <- "https://cloud.r-project.org"
 app_name <- "Bibliometrix Desktop"
@@ -129,6 +133,100 @@ ensure_bibliometrix_installed <- function() {
   invisible(TRUE)
 }
 
+# Full-page splash while Shiny UI/assets initialise (avoids a blank white page).
+wrap_loading_splash <- function(app) {
+  original_ui <- app$ui
+  app$ui <- function(request) {
+    ui <- if (is.function(original_ui)) original_ui(request) else original_ui
+    shiny::tagList(
+      shiny::tags$head(
+        shiny::tags$style(shiny::HTML("
+          #bibdesk-splash {
+            position: fixed; inset: 0; z-index: 99999;
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            gap: 14px; background: #f4f7fb; color: #1f2a37;
+            font-family: 'Segoe UI', Tahoma, sans-serif;
+          }
+          #bibdesk-splash .spinner {
+            width: 48px; height: 48px; border-radius: 50%;
+            border: 4px solid #d9e7ee; border-top-color: #1f6f8b;
+            animation: bibdesk-spin 0.8s linear infinite;
+          }
+          #bibdesk-splash p { margin: 0; color: #5b6b7c; }
+          @keyframes bibdesk-spin { to { transform: rotate(360deg); } }
+        ")),
+        shiny::tags$script(shiny::HTML("
+          (function () {
+            function hideSplash() {
+              var el = document.getElementById('bibdesk-splash');
+              if (el) el.style.display = 'none';
+            }
+            document.addEventListener('DOMContentLoaded', function () {
+              if (window.jQuery) {
+                jQuery(document).on('shiny:sessioninitialized shiny:idle', hideSplash);
+              }
+              setTimeout(hideSplash, 20000);
+            });
+          })();
+        "))
+      ),
+      shiny::div(
+        id = "bibdesk-splash",
+        shiny::div(class = "spinner", `aria-hidden` = "true"),
+        shiny::tags$h2("Loading Biblioshiny…"),
+        shiny::tags$p("Preparing the interface. This may take a moment.")
+      ),
+      ui
+    )
+  }
+  app
+}
+
+# Stop the server when the browser session ends so R does not linger and lock files.
+# A short delay avoids quitting during a normal page refresh.
+wrap_stop_when_browser_closes <- function(app) {
+  original <- app$serverFuncSource
+  app$serverFuncSource <- function() {
+    server <- original()
+    function(input, output, session) {
+      session$onSessionEnded(function() {
+        if (requireNamespace("later", quietly = TRUE)) {
+          later::later(function() {
+            message("Browser session ended; stopping Biblioshiny.")
+            shiny::stopApp()
+          }, delay = 2)
+        } else {
+          message("Browser session ended; stopping Biblioshiny.")
+          shiny::stopApp()
+        }
+      })
+      server(input, output, session)
+    }
+  }
+  app
+}
+
+run_biblioshiny_desktop <- function(host, port, launch_browser = FALSE) {
+  app_dir <- system.file("biblioshiny", package = "bibliometrix")
+  if (!nzchar(app_dir) || !dir.exists(app_dir)) {
+    stop("Could not find biblioshiny app directory inside the bibliometrix package.", call. = FALSE)
+  }
+
+  # Mirror bibliometrix::biblioshiny defaults that matter for desktop use.
+  shiny::shinyOptions(maxUploadSize = 500)
+  shiny::shinyOptions(biblioshiny.max.rows = Inf)
+
+  app <- shiny::shinyAppDir(app_dir)
+  app <- wrap_loading_splash(app)
+  app <- wrap_stop_when_browser_closes(app)
+  shiny::runApp(
+    app,
+    host = host,
+    port = port,
+    launch.browser = isTRUE(launch_browser)
+  )
+}
+
 if (isTRUE(enable_runtime_updates)) {
   update_bibliometrix_from_cran()
 }
@@ -136,23 +234,18 @@ if (isTRUE(enable_runtime_updates)) {
 ensure_bibliometrix_installed()
 message("Using bibliometrix ", installed_bibliometrix_version())
 
-message("Starting Biblioshiny...")
 host <- Sys.getenv("BIBDESK_SHINY_HOST", unset = "127.0.0.1")
 port <- suppressWarnings(as.integer(Sys.getenv("BIBDESK_SHINY_PORT", unset = "3838")))
 if (is.na(port) || port <= 0) {
   port <- 3838L
 }
 
-# Shiny often ends by throwing when the user closes the app; treat that as success.
-# Note: closing the browser tab does NOT stop the server — relaunching the desktop
-# app reopens the existing session (handled by run_bibliometrix.py).
+launch_browser <- !identical(Sys.getenv("BIBDESK_LAUNCH_BROWSER", unset = "0"), "0")
+
+message("Starting Biblioshiny on http://", host, ":", port, " ...")
 tryCatch(
   {
-    bibliometrix::biblioshiny(
-      host = host,
-      port = port,
-      launch.browser = TRUE
-    )
+    run_biblioshiny_desktop(host = host, port = port, launch_browser = launch_browser)
   },
   error = function(e) {
     message("Biblioshiny stopped: ", conditionMessage(e))

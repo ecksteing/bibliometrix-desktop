@@ -7,11 +7,14 @@ import os
 import socket
 import sys
 import subprocess
+import threading
 import traceback
 import webbrowser
 from datetime import datetime
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.error import URLError, HTTPError
+from urllib.parse import quote
 from urllib.request import Request, urlopen
 
 GITHUB_VERSION_URL = (
@@ -21,6 +24,7 @@ RELEASES_URL = "https://github.com/ecksteing/bibliometrix-desktop/releases"
 APP_NAME = "Bibliometrix Desktop"
 SHINY_HOST = "127.0.0.1"
 SHINY_PORT = 3838
+LOADING_PORT = 3837
 
 
 def get_base_dir() -> Path:
@@ -131,6 +135,51 @@ def shiny_http_reachable(port: int = SHINY_PORT) -> bool:
 
 def open_shiny_in_browser(port: int = SHINY_PORT) -> None:
     webbrowser.open(shiny_url(port))
+
+
+def open_loading_page(base_dir: Path, shiny_port: int = SHINY_PORT) -> ThreadingHTTPServer | None:
+    """
+    Serve a small local loading page and open it in the browser while R starts.
+    Returns the server so the caller can shut it down later, or None on failure.
+    """
+    loading_file = base_dir / "loading.html"
+    if loading_file.is_file():
+        html = loading_file.read_text(encoding="utf-8")
+    else:
+        html = (
+            "<!doctype html><meta charset=utf-8><title>Loading…</title>"
+            "<p>Starting Biblioshiny…</p>"
+            "<script>setTimeout(function(){location.replace("
+            f"'{shiny_url(shiny_port)}'"
+            ");},3000);</script>"
+        )
+
+    class LoadingHandler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:  # noqa: N802
+            body = html.encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, format: str, *args) -> None:  # noqa: A003
+            return
+
+    try:
+        server = ThreadingHTTPServer((SHINY_HOST, LOADING_PORT), LoadingHandler)
+    except OSError as exc:
+        log(f"Could not start loading page server on {LOADING_PORT}: {exc}")
+        return None
+
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    target = quote(shiny_url(shiny_port), safe=":/")
+    loading_url = f"http://{SHINY_HOST}:{LOADING_PORT}/?target={target}"
+    log(f"Opening loading page: {loading_url}")
+    webbrowser.open(loading_url)
+    return server
 
 
 def _creationflags_no_window() -> int:
@@ -264,6 +313,8 @@ def start_application(base_dir: Path) -> int:
     env["R_LIBS"] = user_lib if not existing else f"{user_lib}{os.pathsep}{existing}"
     env["BIBDESK_SHINY_HOST"] = SHINY_HOST
     env["BIBDESK_SHINY_PORT"] = str(SHINY_PORT)
+    # Browser is opened by the Python loading page; R should not open a second tab.
+    env["BIBDESK_LAUNCH_BROWSER"] = "0"
 
     creationflags = 0
     startupinfo = None
@@ -274,6 +325,8 @@ def start_application(base_dir: Path) -> int:
 
     log(f"Starting: {rscript_path} {r_script}")
     log(f"R_LIBS_USER={user_lib}")
+
+    loading_server = open_loading_page(base_dir, SHINY_PORT)
 
     try:
         with log_path().open("a", encoding="utf-8") as fh:
@@ -296,6 +349,12 @@ def start_application(base_dir: Path) -> int:
             error=True,
         )
         return 1
+    finally:
+        if loading_server is not None:
+            try:
+                loading_server.shutdown()
+            except Exception:
+                pass
 
     if result.returncode != 0:
         # Shiny/httpuv commonly exits non-zero when the user closes the app.

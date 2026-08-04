@@ -1,18 +1,18 @@
 # Bibliometrix Desktop
 
-An easy way to run [Bibliometrix](https://github.com/massimoaria/bibliometrix) on Windows. Install Bibliometrix Desktop and run — no separate R or Rtools install for end users.
+An easy way to run [Bibliometrix](https://github.com/massimoaria/bibliometrix) on Windows. [Install Bibliometrix Desktop](https://github.com/ecksteing/bibliometrix-desktop/releases) and run. No separate R or Rtools needed.
 
-> **Platform note:** The current release targets **Windows x64**. macOS and Linux packaging are planned as separate artifacts later.
+> **Platform note:** The current release targets **Windows x64**. macOS and Linux packaging are planned for later.
 
 ## Why this tool?
 
-Bibliometrix is excellent for bibliometric analysis, but installing R, package dependencies, and sometimes Rtools is a hurdle for students. This project ships a portable R runtime with **pre-baked Windows binary packages**, plus a simple launcher.
+Bibliometrix is excellent for bibliometric analysis, but installing R, package dependencies, and Rtools is a hurdle for students. This project ships an all-on-one Bibliometrix. Just install and run.
 
 ## Installation (end users)
 
-1. Download `BibliometrixSetup_x.y.z.exe` from [GitHub Releases](https://github.com/ecksteing/bibliometrix-desktop/releases).
+1. Download the latest release from [GitHub Releases](https://github.com/ecksteing/bibliometrix-desktop/releases).
 2. Run the installer (no administrator rights required; installs under your user profile).
-3. Start **Bibliometrix Desktop** from the Start Menu or desktop shortcut. Biblioshiny opens in your browser.
+3. Start **Bibliometrix Desktop** from the Start Menu or desktop shortcut. Bibliometrix/Biblioshiny opens in your browser.
 
 Logs (if something goes wrong) are written to `%LOCALAPPDATA%\Bibliometrix Desktop\launcher.log`.
 
@@ -36,17 +36,19 @@ Only install builds downloaded from the official [GitHub Releases](https://githu
 
 #### Do I need to install R, Rtools, or Shiny?
 
-No. The installer includes a portable R runtime and the Bibliometrix stack as Windows binaries. End users do not need Rtools because packages are not compiled on their machine.
+No. The installer includes everything you need to run Bibliometrix/Biblioshiny. 
 
 #### Do I get the same features as Bibliometrix?
 
-Yes. This wrapper launches official Bibliometrix / Biblioshiny.
+Yes. This app launches official Bibliometrix / Biblioshiny.
+
+#### The app is sometimes slow to load?
+
+Yes. This is a powerful application. It may take a short while to open in your Browser,
 
 #### Is the latest version of Bibliometrix included?
 
-Each desktop release ships with a working Bibliometrix binary baked at build time (so the app works offline). When online, each launch checks **CRAN for a newer Windows binary** of `bibliometrix` and installs it into the user’s library if available. Updates never compile from source and never pull from GitHub, so end users do not need Rtools.
-
-You only need a new desktop installer when the **wrapper / portable R** must change — not for every Bibliometrix CRAN release.
+Each desktop release ships with a working Bibliometrix version (so the app works offline). When online, each launch checks **CRAN for a newer versions** of `bibliometrix` and installs it into the user’s library if available. 
 
 Desktop wrapper updates are separate: the launcher compares `version.txt` on this GitHub repo and notifies users to download a new installer from Releases.
 
@@ -54,8 +56,22 @@ Desktop wrapper updates are separate: the launcher compares `version.txt` on thi
 
 I am a university lecturer. I encourage students to use Bibliometrix for literature analysis and wanted a one-click option. I have also used [Bibliometrix in peer-reviewed literature](https://link.springer.com/article/10.1007/s11301-024-00458-5).
 
-## Building from source (maintainers)
+## Licence
 
+This project is distributed under the [GNU GPL v3](LICENSE). Bibliometrix and R retain their own licences; see upstream projects for details.
+
+## Support
+
+- Installer / desktop wrapper: [GitHub Issues](https://github.com/ecksteing/bibliometrix-desktop/issues)
+- Bibliometrix itself: contact the Bibliometrix authors / upstream repo
+
+## Acknowledgements
+
+- [Bibliometrix](https://github.com/massimoaria/bibliometrix) by Massimo Aria and colleagues
+- R Core Team and CRAN binary package maintainers
+
+## Building from source (maintainers)
+End users can ignore this section.
 ### Prerequisites
 
 - Windows x64
@@ -92,17 +108,3 @@ pyinstaller --onefile --noconsole --icon=app_icon.ico run_bibliometrix.py
 ```
 
 Bump `version.txt` before each release. Publish **only** the setup exe on GitHub Releases (not the whole `R-Portable` tree).
-
-## Licence
-
-This project is distributed under the [GNU GPL v3](LICENSE). Bibliometrix and R retain their own licences; see upstream projects for details.
-
-## Support
-
-- Installer / desktop wrapper: [GitHub Issues](https://github.com/ecksteing/bibliometrix-desktop/issues)
-- Bibliometrix itself: contact the Bibliometrix authors / upstream repo
-
-## Acknowledgements
-
-- [Bibliometrix](https://github.com/massimoaria/bibliometrix) by Massimo Aria and colleagues
-- R Core Team and CRAN binary package maintainers

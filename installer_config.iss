@@ -31,7 +31,7 @@ OutputDir=Output
 OutputBaseFilename=BibliometrixSetup_{#MyAppVersion}
 SetupIconFile=app_icon.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
-Compression=lzma
+Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
 PrivilegesRequired=lowest
@@ -54,6 +54,8 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 [Files]
 Source: "run_bibliometrix.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "launch_app.R"; DestDir: "{app}"; Flags: ignoreversion
+Source: "loading.html"; DestDir: "{app}"; Flags: ignoreversion
+Source: "stop_bibliometrix.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "version.txt"; DestDir: "{app}"; Flags: ignoreversion
 Source: "LICENSE"; DestDir: "{app}"; Flags: ignoreversion
 Source: "app_icon.ico"; DestDir: "{app}"; Flags: ignoreversion
@@ -71,3 +73,34 @@ Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#MyAppName}}
 ; (CRAN updates in R_library, launcher.log, and any other leftovers).
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}"
+
+[Code]
+procedure StopAppProcesses();
+var
+  ResultCode: Integer;
+  ScriptPath: String;
+begin
+  ScriptPath := ExpandConstant('{app}\stop_bibliometrix.ps1');
+  if FileExists(ScriptPath) then
+  begin
+    Exec(
+      ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+      '-NoProfile -ExecutionPolicy Bypass -File "' + ScriptPath + '"',
+      '', SW_HIDE, ewWaitUntilTerminated, ResultCode
+    );
+  end;
+end;
+
+function InitializeUninstall(): Boolean;
+begin
+  { Must run before files are deleted, while stop_bibliometrix.ps1 still exists. }
+  StopAppProcesses();
+  Result := True;
+end;
+
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+begin
+  { Stop processes on upgrade/reinstall so files can be replaced. }
+  StopAppProcesses();
+  Result := '';
+end;
