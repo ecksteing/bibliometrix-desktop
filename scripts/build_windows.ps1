@@ -1,9 +1,9 @@
 # scripts/build_windows.ps1
-# Build run_bibliometrix.exe and the Inno Setup installer.
+# Build the onedir launcher (run_bibliometrix.exe + _internal) and Inno Setup installer.
 #
 # Prerequisites:
 #   - Python with PyInstaller (pip install -r requirements-build.txt)
-#   - Inno Setup 6 (ISCC.exe)
+#   - Inno Setup 6+ (ISCC.exe)
 #   - R-Portable present under .\R-Portable
 #
 # Usage (from repo root):
@@ -22,9 +22,14 @@ $Root = Resolve-Path (Join-Path $PSScriptRoot "..")
 Set-Location $Root
 
 function Find-ISCC {
+    # Prefer newer Inno (7+) including per-user installs under LocalAppData.
     $candidates = @(
-        "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
+        (Join-Path $env:LOCALAPPDATA "Programs\Inno Setup 7\ISCC.exe"),
+        "$env:ProgramFiles\Inno Setup 7\ISCC.exe",
+        "${env:ProgramFiles(x86)}\Inno Setup 7\ISCC.exe",
+        (Join-Path $env:LOCALAPPDATA "Programs\Inno Setup 6\ISCC.exe"),
         "$env:ProgramFiles\Inno Setup 6\ISCC.exe",
+        "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
         "ISCC.exe"
     )
     foreach ($path in $candidates) {
@@ -34,6 +39,20 @@ function Find-ISCC {
         if (Test-Path $path) {
             return $path
         }
+    }
+
+    # Fallback: any "Inno Setup *" folder under common roots.
+    $searchRoots = @(
+        (Join-Path $env:LOCALAPPDATA "Programs"),
+        $env:ProgramFiles,
+        ${env:ProgramFiles(x86)}
+    ) | Where-Object { $_ -and (Test-Path $_) }
+    foreach ($root in $searchRoots) {
+        $hit = Get-ChildItem -Path $root -Directory -Filter "Inno Setup *" -ErrorAction SilentlyContinue |
+            ForEach-Object { Join-Path $_.FullName "ISCC.exe" } |
+            Where-Object { Test-Path $_ } |
+            Select-Object -First 1
+        if ($hit) { return $hit }
     }
     return $null
 }
@@ -68,7 +87,7 @@ if (-not $SkipBake) {
     if ($LASTEXITCODE -ne 0) {
         throw "bake_packages.R failed with exit code $LASTEXITCODE"
     }
-    Write-Host "==> Trimming tests/demos from R-Portable..."
+    Write-Host "==> Trimming non-runtime docs/tests/Tcl from R-Portable..."
     & powershell -ExecutionPolicy Bypass -File (Join-Path $Root "scripts\trim_r_portable.ps1")
 } else {
     Write-Host "==> Skipping package bake (-SkipBake)"
@@ -77,15 +96,16 @@ if (-not $SkipBake) {
 Write-Host "==> Installing/upgrading PyInstaller..."
 python -m pip install --upgrade -r (Join-Path $Root "requirements-build.txt")
 
-Write-Host "==> Building run_bibliometrix.exe..."
-$distDir = Join-Path $Root "dist"
-$exeBuilt = Join-Path $distDir "run_bibliometrix.exe"
+Write-Host "==> Building onedir launcher (run_bibliometrix.exe + _internal)..."
+$distAppDir = Join-Path $Root "dist\run_bibliometrix"
+$exeBuilt = Join-Path $distAppDir "run_bibliometrix.exe"
 $exeRoot = Join-Path $Root "run_bibliometrix.exe"
+$internalRoot = Join-Path $Root "_internal"
 
 python -m PyInstaller `
     --noconfirm `
     --clean `
-    --onefile `
+    --onedir `
     --noconsole `
     --name run_bibliometrix `
     --icon (Join-Path $Root "app_icon.ico") `
@@ -95,8 +115,13 @@ if (-not (Test-Path $exeBuilt)) {
     throw "PyInstaller did not produce $exeBuilt"
 }
 
+# Stage next to R-Portable so local testing and Inno use the same layout.
+if (Test-Path $internalRoot) {
+    Remove-Item -LiteralPath $internalRoot -Recurse -Force
+}
 Copy-Item -Force $exeBuilt $exeRoot
-Write-Host "Copied launcher to $exeRoot"
+Copy-Item -Recurse -Force (Join-Path $distAppDir "_internal") $internalRoot
+Write-Host "Staged launcher at $exeRoot (with _internal\)"
 
 if ($SkipInstaller) {
     Write-Host "==> Skipping Inno Setup (-SkipInstaller)"
@@ -106,7 +131,7 @@ if ($SkipInstaller) {
 
 $iscc = Find-ISCC
 if (-not $iscc) {
-    throw "Inno Setup 6 (ISCC.exe) not found. Install it or pass -SkipInstaller."
+    throw "Inno Setup (ISCC.exe) not found. Install Inno Setup 6+ (including per-user installs) or pass -SkipInstaller."
 }
 
 Write-Host "==> Compiling installer with $iscc ..."

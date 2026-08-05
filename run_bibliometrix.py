@@ -25,6 +25,8 @@ APP_NAME = "Bibliometrix Desktop"
 SHINY_HOST = "127.0.0.1"
 SHINY_PORT = 3838
 LOADING_PORT = 3837
+LOG_MAX_BYTES = 2 * 1024 * 1024  # 2 MiB
+LOG_BACKUP_COUNT = 2
 
 
 def get_base_dir() -> Path:
@@ -62,9 +64,29 @@ def log_path() -> Path:
     return get_log_dir() / "launcher.log"
 
 
+def rotate_logs_if_needed() -> None:
+    """Keep launcher.log from growing without bound (size-based rotation)."""
+    path = log_path()
+    try:
+        if not path.is_file() or path.stat().st_size < LOG_MAX_BYTES:
+            return
+        oldest = path.with_name(f"launcher.log.{LOG_BACKUP_COUNT}")
+        if oldest.exists():
+            oldest.unlink()
+        for i in range(LOG_BACKUP_COUNT - 1, 0, -1):
+            src = path.with_name(f"launcher.log.{i}")
+            dst = path.with_name(f"launcher.log.{i + 1}")
+            if src.exists():
+                src.replace(dst)
+        path.replace(path.with_name("launcher.log.1"))
+    except OSError:
+        pass
+
+
 def log(message: str) -> None:
     line = f"{datetime.now().isoformat(timespec='seconds')} {message}"
     try:
+        rotate_logs_if_needed()
         with log_path().open("a", encoding="utf-8") as fh:
             fh.write(line + "\n")
     except OSError:
@@ -86,6 +108,23 @@ def show_message(text: str, title: str = APP_NAME, error: bool = False) -> None:
     print(text, file=sys.stderr)
 
 
+def ask_yes_no(text: str, title: str = APP_NAME) -> bool:
+    """Ask a Yes/No question. Returns True if the user chooses Yes."""
+    log(f"PROMPT: {text.replace(chr(10), ' | ')}")
+    if sys.platform == "win32":
+        try:
+            import ctypes
+
+            # MB_YESNO | MB_ICONINFORMATION; IDYES == 6
+            result = ctypes.windll.user32.MessageBoxW(0, text, title, 0x04 | 0x40)
+            return result == 6
+        except Exception:
+            pass
+    # Non-Windows / dialog failure: print and do not assume Yes.
+    print(text, file=sys.stderr)
+    return False
+
+
 def get_local_version(base_dir: Path) -> str:
     version_file = base_dir / "version.txt"
     try:
@@ -104,12 +143,15 @@ def check_for_wrapper_updates(current_version: str) -> None:
         with urlopen(request, timeout=3) as response:
             latest = response.read().decode("utf-8", errors="replace").strip()
         if latest and latest != current_version:
-            show_message(
+            open_download = ask_yes_no(
                 f"A new version ({latest}) is available.\n"
                 f"You are running {current_version}.\n\n"
-                f"Download it from:\n{RELEASES_URL}",
+                f"Open the download page now?",
                 title=f"{APP_NAME} update available",
             )
+            if open_download:
+                log(f"Opening releases page: {RELEASES_URL}")
+                webbrowser.open(RELEASES_URL)
     except (URLError, HTTPError, TimeoutError, ValueError, OSError):
         # Offline or private/unavailable repo — continue silently.
         log("Update check skipped (offline or unavailable).")
@@ -329,6 +371,7 @@ def start_application(base_dir: Path) -> int:
     loading_server = open_loading_page(base_dir, SHINY_PORT)
 
     try:
+        rotate_logs_if_needed()
         with log_path().open("a", encoding="utf-8") as fh:
             fh.write(
                 f"\n----- R session {datetime.now().isoformat(timespec='seconds')} -----\n"

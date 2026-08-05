@@ -14,8 +14,9 @@
 cran_repo <- "https://cloud.r-project.org"
 app_name <- "Bibliometrix Desktop"
 
-# Check CRAN for a newer bibliometrix binary on every launch (when online).
+# Check CRAN for a newer bibliometrix binary when online, at most weekly.
 enable_runtime_updates <- TRUE
+update_check_interval_days <- 7L
 
 user_lib <- Sys.getenv("R_LIBS_USER", unset = NA_character_)
 if (is.na(user_lib) || !nzchar(user_lib)) {
@@ -27,6 +28,9 @@ if (is.na(user_lib) || !nzchar(user_lib)) {
   }
 }
 dir.create(user_lib, recursive = TRUE, showWarnings = FALSE)
+app_data_dir <- dirname(user_lib)
+dir.create(app_data_dir, recursive = TRUE, showWarnings = FALSE)
+cran_check_stamp_path <- file.path(app_data_dir, "cran_update_check.txt")
 
 # User library first so CRAN updates override the baked copy.
 portable_libs <- .libPaths()
@@ -61,6 +65,44 @@ cran_bibliometrix_binary_version <- function() {
   ap["bibliometrix", "Version"]
 }
 
+should_run_cran_update_check <- function() {
+  if (!file.exists(cran_check_stamp_path)) {
+    return(TRUE)
+  }
+  stamp <- tryCatch(
+    trimws(readLines(cran_check_stamp_path, n = 1L, warn = FALSE)),
+    error = function(e) NA_character_
+  )
+  if (length(stamp) < 1L || is.na(stamp) || !nzchar(stamp[[1L]])) {
+    return(TRUE)
+  }
+  stamp_clean <- sub("Z$", "", stamp[[1L]], ignore.case = TRUE)
+  last <- tryCatch(
+    as.POSIXct(stamp_clean, format = "%Y-%m-%dT%H:%M:%S", tz = "UTC"),
+    error = function(e) as.POSIXct(NA)
+  )
+  if (is.na(last)) {
+    return(TRUE)
+  }
+  age_days <- as.numeric(difftime(Sys.time(), last, units = "days"))
+  is.na(age_days) || age_days >= update_check_interval_days
+}
+
+record_cran_update_check <- function() {
+  tryCatch(
+    {
+      writeLines(
+        strftime(Sys.time(), "%Y-%m-%dT%H:%M:%SZ", tz = "UTC"),
+        cran_check_stamp_path
+      )
+    },
+    error = function(e) {
+      message("Could not write CRAN check stamp: ", conditionMessage(e))
+    }
+  )
+  invisible(NULL)
+}
+
 update_bibliometrix_from_cran <- function() {
   message("Checking CRAN for a newer bibliometrix Windows binary...")
   tryCatch({
@@ -69,11 +111,13 @@ update_bibliometrix_from_cran <- function() {
 
     if (is.na(latest)) {
       message("No CRAN binary listed for this R version; keeping installed copy.")
+      record_cran_update_check()
       return(invisible(FALSE))
     }
 
     if (!is.na(current) && package_version(latest) <= package_version(current)) {
       message("bibliometrix is up to date (", current, ").")
+      record_cran_update_check()
       return(invisible(FALSE))
     }
 
@@ -93,8 +137,10 @@ update_bibliometrix_from_cran <- function() {
 
     new_ver <- installed_bibliometrix_version()
     message("Installed bibliometrix ", new_ver, " into user library.")
+    record_cran_update_check()
     invisible(TRUE)
   }, error = function(e) {
+    # Leave stamp untouched so an offline failure retries on the next launch.
     message("CRAN update skipped (offline or unavailable): ", conditionMessage(e))
     invisible(FALSE)
   })
@@ -228,7 +274,15 @@ run_biblioshiny_desktop <- function(host, port, launch_browser = FALSE) {
 }
 
 if (isTRUE(enable_runtime_updates)) {
-  update_bibliometrix_from_cran()
+  if (should_run_cran_update_check()) {
+    update_bibliometrix_from_cran()
+  } else {
+    message(
+      "Skipping CRAN update check (last successful check within ",
+      update_check_interval_days,
+      " days)."
+    )
+  }
 }
 
 ensure_bibliometrix_installed()
