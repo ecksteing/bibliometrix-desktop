@@ -48,7 +48,7 @@ Yes. This is a powerful application. It may take a short while to open in your B
 
 #### Is the latest version of Bibliometrix included?
 
-Each desktop release ships with a working Bibliometrix version (so the app works offline). When online, each launch checks **CRAN for a newer versions** of `bibliometrix` and installs it into the user’s library if available. 
+Each desktop release ships with a working Bibliometrix version (so the app works offline). When online, the app checks **CRAN for a newer version** of `bibliometrix` at most once per week and installs it into the user’s library if available. 
 
 Desktop wrapper updates are separate: the launcher compares `version.txt` on this GitHub repo and notifies users to download a new installer from Releases.
 
@@ -76,7 +76,7 @@ End users can ignore this section.
 
 - Windows x64
 - [Python 3](https://www.python.org/) + `pip install -r requirements-build.txt`
-- [Inno Setup 6](https://jrsoftware.org/isinfo.php)
+- [Inno Setup 6+](https://jrsoftware.org/isinfo.php) (per-user or machine-wide install)
 - Portable R under `R-Portable\` (PortableApps-style layout). Use a **current R 4.4/4.5** Windows build so CRAN still publishes recent `bibliometrix` binaries. Older R (e.g. 4.2.0) can only bake older binary package versions.
 
 ### One-shot Windows build
@@ -90,8 +90,9 @@ powershell -ExecutionPolicy Bypass -File .\scripts\build_windows.ps1
 This will:
 
 1. Bake `bibliometrix` (CRAN binaries) into `R-Portable` via `scripts/bake_packages.R`
-2. Compile `run_bibliometrix.exe` with PyInstaller (`--onefile --noconsole`)
-3. Compile `installer_config.iss` into `Output\BibliometrixSetup_<version>.exe`
+2. Trim non-runtime docs/tests/Tcl trees via `scripts/trim_r_portable.ps1`
+3. Compile the onedir launcher with PyInstaller (`--onedir --noconsole`) and stage `run_bibliometrix.exe` + `_internal\` at the repo root
+4. Compile `installer_config.iss` into `Output\BibliometrixSetup_<version>.exe`
 
 Useful flags:
 
@@ -101,10 +102,12 @@ Useful flags:
 ### Manual steps (equivalent)
 
 ```powershell
-.\R-Portable\App\R-Portable\bin\Rscript.exe .\scripts\bake_packages.R
+.\R-Portable\bin\Rscript.exe .\scripts\bake_packages.R
+powershell -ExecutionPolicy Bypass -File .\scripts\trim_r_portable.ps1
 pip install -r requirements-build.txt
-pyinstaller --onefile --noconsole --icon=app_icon.ico run_bibliometrix.py
-# Copy dist\run_bibliometrix.exe to the repo root, then compile installer_config.iss in Inno Setup
+pyinstaller --onedir --noconsole --icon=app_icon.ico --name run_bibliometrix run_bibliometrix.py
+# Copy dist\run_bibliometrix\run_bibliometrix.exe and dist\run_bibliometrix\_internal to the repo root,
+# then compile installer_config.iss in Inno Setup
 ```
 
 Bump `version.txt` before each release. Publish **only** the setup exe on GitHub Releases (not the whole `R-Portable` tree).

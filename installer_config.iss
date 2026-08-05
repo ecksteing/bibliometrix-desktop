@@ -1,7 +1,8 @@
 ; installer_config.iss
 ; Builds the Windows installer for Bibliometrix Desktop.
-; Prerequisites: run_bibliometrix.exe built with PyInstaller, and R-Portable
-; prepared with scripts/bake_packages.R (binary packages preinstalled).
+; Prerequisites: PyInstaller --onedir output staged as run_bibliometrix.exe +
+; _internal\ at the repo root, and R-Portable prepared with
+; scripts/bake_packages.R (binary packages preinstalled).
 
 ; --- Read version dynamically from version.txt ---
 #define VerFile FileOpen("version.txt")
@@ -53,6 +54,7 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 
 [Files]
 Source: "run_bibliometrix.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "_internal\*"; DestDir: "{app}\_internal"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "launch_app.R"; DestDir: "{app}"; Flags: ignoreversion
 Source: "loading.html"; DestDir: "{app}"; Flags: ignoreversion
 Source: "stop_bibliometrix.ps1"; DestDir: "{app}"; Flags: ignoreversion

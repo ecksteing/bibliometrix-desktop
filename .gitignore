@@ -4,6 +4,7 @@ build/
 dist/
 *.spec
 *.exe
+_internal/
 
 # Python
 __pycache__/
@@ -19,12 +20,13 @@ venv/
 # Uncomment after removing R-Portable from git tracking:
 # R-Portable/
 
-# OS / editor
+# OS / editor / local AI agent context (do not publish)
 Thumbs.db
 Desktop.ini
 .DS_Store
 .idea/
 .vscode/
+.cursor/
 *.swp
 
 # Temporary docs
