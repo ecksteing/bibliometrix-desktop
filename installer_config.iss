@@ -58,6 +58,8 @@ Source: "_internal\*"; DestDir: "{app}\_internal"; Flags: ignoreversion recurses
 Source: "launch_app.R"; DestDir: "{app}"; Flags: ignoreversion
 Source: "loading.html"; DestDir: "{app}"; Flags: ignoreversion
 Source: "stop_bibliometrix.ps1"; DestDir: "{app}"; Flags: ignoreversion
+; Also pack for ExtractTemporaryFile so upgrades use THIS script, not the old install's copy.
+Source: "stop_bibliometrix.ps1"; Flags: dontcopy
 Source: "version.txt"; DestDir: "{app}"; Flags: ignoreversion
 Source: "LICENSE"; DestDir: "{app}"; Flags: ignoreversion
 Source: "app_icon.ico"; DestDir: "{app}"; Flags: ignoreversion
@@ -77,32 +79,51 @@ Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#MyAppName}}
 Type: filesandordirs; Name: "{app}"
 
 [Code]
-procedure StopAppProcesses();
+procedure StopAppProcessesIn(const AppDir: String);
 var
   ResultCode: Integer;
   ScriptPath: String;
+  Params: String;
 begin
-  ScriptPath := ExpandConstant('{app}\stop_bibliometrix.ps1');
+  if AppDir = '' then
+    Exit;
+
+  { Prefer the stop script packed in this setup (dontcopy), so upgrades are not
+    stuck with a weaker script from the previously installed version. }
+  ExtractTemporaryFile('stop_bibliometrix.ps1');
+  ScriptPath := ExpandConstant('{tmp}\stop_bibliometrix.ps1');
+  if not FileExists(ScriptPath) then
+    ScriptPath := AppDir + '\stop_bibliometrix.ps1';
   if FileExists(ScriptPath) then
   begin
+    Params :=
+      '-NoProfile -ExecutionPolicy Bypass -File "' + ScriptPath +
+      '" -AppDir "' + AppDir + '"';
     Exec(
       ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
-      '-NoProfile -ExecutionPolicy Bypass -File "' + ScriptPath + '"',
+      Params,
       '', SW_HIDE, ewWaitUntilTerminated, ResultCode
     );
   end;
 end;
 
+function InitializeSetup(): Boolean;
+begin
+  { App path is not ready yet; use the default per-user install location. }
+  StopAppProcessesIn(ExpandConstant('{localappdata}\{#MyAppName}'));
+  Result := True;
+end;
+
 function InitializeUninstall(): Boolean;
 begin
-  { Must run before files are deleted, while stop_bibliometrix.ps1 still exists. }
-  StopAppProcesses();
+  { Must run before files are deleted. App path is valid during uninstall. }
+  StopAppProcessesIn(ExpandConstant('{app}'));
   Result := True;
 end;
 
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 begin
-  { Stop processes on upgrade/reinstall so files can be replaced. }
-  StopAppProcesses();
+  { Stop again immediately before files are replaced. }
+  StopAppProcessesIn(ExpandConstant('{app}'));
   Result := '';
 end;
