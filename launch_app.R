@@ -7,6 +7,7 @@
 #   - Newer packages install into a writable user library and take precedence
 #   - If offline / update fails, the baked-in copy still launches
 #
+#
 # Lifecycle:
 #   Closing the browser session stops the Shiny server (after a short delay),
 #   so R does not keep locking files after the user is done.
