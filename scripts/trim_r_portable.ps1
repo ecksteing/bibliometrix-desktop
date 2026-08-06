@@ -4,7 +4,7 @@
 #
 # Usage (from repo root, after bake_packages.R):
 #   powershell -ExecutionPolicy Bypass -File .\scripts\trim_r_portable.ps1
-
+#
 $ErrorActionPreference = "Stop"
 $Root = Resolve-Path (Join-Path $PSScriptRoot "..")
 
