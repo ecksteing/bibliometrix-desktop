@@ -1,6 +1,6 @@
 # Bibliometrix Desktop
 
-An easy way to run [Bibliometrix](https://github.com/massimoaria/bibliometrix) on Windows. [Install Bibliometrix Desktop](https://github.com/ecksteing/bibliometrix-desktop/releases) and run. No separate R or Rtools needed.
+An easy way to run [Bibliometrix](https://github.com/massimoaria/bibliometrix) on Windows. ➡️ [Install Bibliometrix Desktop](https://github.com/ecksteing/bibliometrix-desktop/releases) and run. No separate R or Rtools needed.
 
 > **Platform note:** The current release targets **Windows x64**. macOS and Linux packaging are planned for later.
 
@@ -16,7 +16,7 @@ Bibliometrix is excellent for bibliometric analysis, but installing R, package d
 
 Logs (if something goes wrong) are written to `%LOCALAPPDATA%\Bibliometrix Desktop\launcher.log`.
 
-### If Windows blocks the installer
+### If Windows blocks the installer 🤷‍
 
 Windows SmartScreen (and some browsers or antivirus tools) may warn that the app is from an “unknown publisher.” That is common for new, unsigned open-source installers and does **not** mean the file is malware.
 
@@ -48,7 +48,7 @@ Yes. This is a powerful application. It may take a short while to open in your B
 
 #### Is the latest version of Bibliometrix included?
 
-Each desktop release ships with a working Bibliometrix version (so the app works offline). When online, the app checks **CRAN for a newer version** of `bibliometrix` at most once per week and installs it into the user’s library if available. 
+Each desktop release ships with a working Bibliometrix version (so the app works offline). When online, the app checks for a newer version of `bibliometrix` at most once per week and installs it into the user’s library if available. 
 
 Desktop wrapper updates are separate: the launcher compares `version.txt` on this GitHub repo and notifies users to download a new installer from Releases.
 
