@@ -1,5 +1,5 @@
 ba7bd1d1163e07322eca23110ebfcbfe *CITATION
-6878bce23de249bff958132b760e9348 *DESCRIPTION
+eae7c8f2f2b8c6333c21d14fe0350c4e *DESCRIPTION
 f640507060e8844371f13d30cab9ebab *INDEX
 6211182e0adf1c63b0cfdf3acec7d76c *Meta/Rd.rds
 8a56d9cd3cc442f4055b6662b3f1208c *Meta/data.rds
@@ -7,7 +7,7 @@ f640507060e8844371f13d30cab9ebab *INDEX
 23f3facfaa6bcc6e59d356dc796af7cd *Meta/hsearch.rds
 f2fe57a9c64db79dab6d472f5aa2facd *Meta/links.rds
 f0644ef72aa014457583695de06f77f0 *Meta/nsInfo.rds
-32cf544dc6fdc475dfa1a20075b5222c *Meta/package.rds
+427bd175db1924bdef8727c7e6aa9a2e *Meta/package.rds
 73a7e587ad5fdc81290b2b0db1c2a6f0 *NAMESPACE
 b08d8263a4e07340599d6e3f4fe03fb5 *NEWS
 d6c68f1fe41ced6e98a766a3757313da *R/bibliometrix
@@ -44,8 +44,8 @@ c24bbc073d064b4eb8899a564cb6c0b4 *biblioshiny/www/logo2.jpg
 4f99da95ed55d4c9975cff4ea89b8988 *data/Rdata.rdx
 87b436f61c4e4a5daa042ce7db4c1dd7 *help/AnIndex
 b7920f7edf6ebd25248523a1f4c4054f *help/aliases.rds
-f24b9037978cad0d8175579c4ac9e1d9 *help/bibliometrix.rdb
-fed09ac1c328c480fcb93f0150d3c79f *help/bibliometrix.rdx
-ee103ab6826a592de7540b1bdfc84568 *help/paths.rds
+60e4fcadb19318a378ec0ee7ea1ee770 *help/bibliometrix.rdb
+a50ffe2d201b3f8ec001f15461a596b8 *help/bibliometrix.rdx
+8bffde810ea189b81843413a380aa067 *help/paths.rds
 6710b89079a4bd85645415518b342743 *html/00Index.html
 ee41876c0116916bb04bcf4fe3e43d78 *html/R.css
