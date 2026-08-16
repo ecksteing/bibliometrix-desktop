@@ -28,7 +28,7 @@ Windows SmartScreen (and some browsers or antivirus tools) may warn that the app
 **Microsoft Edge / Chrome download warning:**
 
 1. Open the browser’s downloads list.
-2. Choose **Keep** / **Keep anyway** (Edge may ask you to confirm under the **…** menu).
+2. Choose **Keep** / **Keep anyway** (Edge may ask you to confirm under the **...** menu).
 
 Only install builds downloaded from the official [GitHub Releases](https://github.com/ecksteing/bibliometrix-desktop/releases) page for this project. If your organisation’s antivirus still blocks the file, ask IT to allowlist it, or open a [GitHub Issue](https://github.com/ecksteing/bibliometrix-desktop/issues).
 
@@ -96,8 +96,8 @@ This will:
 
 Useful flags:
 
-- `-SkipBake` — skip package baking (only if already baked)
-- `-SkipInstaller` — build the launcher exe only
+- `-SkipBake` - skip package baking (only if already baked)
+- `-SkipInstaller` - build the launcher exe only
 
 ### Manual steps (equivalent)
 
