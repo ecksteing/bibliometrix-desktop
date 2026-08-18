@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import socket
 import sys
@@ -134,28 +135,56 @@ def get_local_version(base_dir: Path) -> str:
         return "0.0.0"
 
 
-def check_for_wrapper_updates(current_version: str) -> None:
-    """Notify if a newer desktop wrapper version is published on GitHub."""
+def query_wrapper_update(current_version: str) -> dict:
+    """Return desktop wrapper update status from GitHub version.txt."""
     try:
         request = Request(
             GITHUB_VERSION_URL,
             headers={"User-Agent": f"{APP_NAME}/{current_version}"},
         )
-        with urlopen(request, timeout=3) as response:
+        with urlopen(request, timeout=5) as response:
             latest = response.read().decode("utf-8", errors="replace").strip()
-        if latest and latest != current_version:
-            open_download = ask_yes_no(
-                f"A new version ({latest}) is available.\n"
-                f"You are running {current_version}.\n\n"
-                f"Open the download page now?",
-                title=f"{APP_NAME} update available",
-            )
-            if open_download:
-                log(f"Opening releases page: {RELEASES_URL}")
-                webbrowser.open(RELEASES_URL)
+        if not latest:
+            return {"status": "error", "message": "Could not read the latest version."}
+        if latest == current_version:
+            return {
+                "status": "current",
+                "current": current_version,
+                "latest": latest,
+                "message": f"You have the latest desktop installer ({current_version}).",
+            }
+        return {
+            "status": "update",
+            "current": current_version,
+            "latest": latest,
+            "releases_url": RELEASES_URL,
+            "message": (
+                f"A newer desktop installer ({latest}) is available. "
+                f"You are running {current_version}."
+            ),
+        }
     except (URLError, HTTPError, TimeoutError, ValueError, OSError):
-        # Offline or private/unavailable repo — continue silently.
-        log("Update check skipped (offline or unavailable).")
+        return {
+            "status": "offline",
+            "message": "Update check unavailable (offline or GitHub unreachable).",
+        }
+
+
+def check_for_wrapper_updates(current_version: str) -> None:
+    """Notify if a newer desktop wrapper version is published on GitHub."""
+    result = query_wrapper_update(current_version)
+    if result["status"] != "update":
+        if result["status"] == "offline":
+            log("Update check skipped (offline or unavailable).")
+        return
+
+    open_download = ask_yes_no(
+        f"{result['message']}\n\nOpen the download page now?",
+        title=f"{APP_NAME} update available",
+    )
+    if open_download:
+        log(f"Opening releases page: {RELEASES_URL}")
+        webbrowser.open(RELEASES_URL)
 
 
 def shiny_url(port: int = SHINY_PORT) -> str:
@@ -180,7 +209,9 @@ def open_shiny_in_browser(port: int = SHINY_PORT) -> None:
     webbrowser.open(shiny_url(port))
 
 
-def open_loading_page(base_dir: Path, shiny_port: int = SHINY_PORT) -> ThreadingHTTPServer | None:
+def open_loading_page(
+    base_dir: Path, shiny_port: int = SHINY_PORT, current_version: str = "0.0.0"
+) -> ThreadingHTTPServer | None:
     """
     Serve a small local loading page and open it in the browser while R starts.
     Returns the server so the caller can shut it down later, or None on failure.
@@ -198,7 +229,22 @@ def open_loading_page(base_dir: Path, shiny_port: int = SHINY_PORT) -> Threading
         )
 
     class LoadingHandler(BaseHTTPRequestHandler):
+        def _send_json(self, payload: dict, status: int = 200) -> None:
+            body = json.dumps(payload).encode("utf-8")
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(body)
+
         def do_GET(self) -> None:  # noqa: N802
+            path = self.path.split("?", 1)[0]
+            if path == "/check-update":
+                log("Manual desktop update check requested from loading page.")
+                self._send_json(query_wrapper_update(current_version))
+                return
+
             body = html.encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -369,7 +415,7 @@ def start_application(base_dir: Path) -> int:
     log(f"Starting: {rscript_path} {r_script}")
     log(f"R_LIBS_USER={user_lib}")
 
-    loading_server = open_loading_page(base_dir, SHINY_PORT)
+    loading_server = open_loading_page(base_dir, SHINY_PORT, current_version=get_local_version(base_dir))
 
     try:
         rotate_logs_if_needed()

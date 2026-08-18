@@ -26,7 +26,7 @@
         var(--bg);
     }
     .card {
-      width: min(420px, calc(100vw - 32px));
+      width: min(460px, calc(100vw - 32px));
       background: var(--card);
       border: 1px solid var(--ring);
       border-radius: 16px;
@@ -61,6 +61,55 @@
       color: var(--accent);
       min-height: 1.2em;
     }
+    .updates {
+      margin-top: 22px;
+      padding-top: 18px;
+      border-top: 1px solid var(--ring);
+      text-align: left;
+    }
+    .updates h2 {
+      margin: 0 0 8px;
+      font-size: 0.95rem;
+      font-weight: 650;
+      color: var(--text);
+      text-align: center;
+    }
+    .updates p {
+      font-size: 0.88rem;
+      margin-bottom: 12px;
+    }
+    .update-actions {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      align-items: center;
+    }
+    button {
+      appearance: none;
+      border: 1px solid var(--accent);
+      background: var(--accent);
+      color: #fff;
+      border-radius: 999px;
+      padding: 10px 18px;
+      font: inherit;
+      font-size: 0.92rem;
+      cursor: pointer;
+    }
+    button:hover { filter: brightness(1.05); }
+    button:disabled {
+      opacity: 0.65;
+      cursor: wait;
+    }
+    .update-result {
+      min-height: 1.2em;
+      font-size: 0.86rem;
+      color: var(--muted);
+      text-align: center;
+      line-height: 1.4;
+    }
+    .update-result a {
+      color: var(--accent);
+    }
   </style>
 </head>
 <body>
@@ -69,20 +118,37 @@
     <h1>Starting Biblioshiny</h1>
     <p>Please wait while Bibliometrix Desktop prepares the app. This can take a little longer the first time.</p>
     <div class="status" id="status">Checking for the app...</div>
+
+    <section class="updates" aria-labelledby="updates-heading">
+      <h2 id="updates-heading">Updates</h2>
+      <p>
+        Bibliometrix package updates are checked automatically about once a week while the app runs.
+        Manual checks are not necessary, but you can use the button below to look for a newer desktop installer now.
+      </p>
+      <div class="update-actions">
+        <button type="button" id="check-update">Check for update</button>
+        <div class="update-result" id="update-result" aria-live="polite"></div>
+      </div>
+    </section>
   </main>
   <script>
     (function () {
       var params = new URLSearchParams(window.location.search);
       var target = params.get("target") || "http://127.0.0.1:3838/";
       var statusEl = document.getElementById("status");
+      var checkBtn = document.getElementById("check-update");
+      var updateResultEl = document.getElementById("update-result");
 
       function setStatus(text) {
         statusEl.textContent = text;
       }
 
+      function setUpdateResult(html) {
+        updateResultEl.innerHTML = html;
+      }
+
       function probe() {
         setStatus("Waiting for Biblioshiny…");
-        // no-cors: Shiny does not send CORS headers; opaque success means the server answered.
         fetch(target, { method: "GET", mode: "no-cors", cache: "no-store" })
           .then(function () {
             setStatus("Opening Biblioshiny…");
@@ -92,6 +158,31 @@
             setTimeout(probe, 700);
           });
       }
+
+      checkBtn.addEventListener("click", function () {
+        checkBtn.disabled = true;
+        setUpdateResult("Checking for updates…");
+        fetch("/check-update", { cache: "no-store" })
+          .then(function (response) { return response.json(); })
+          .then(function (data) {
+            if (data.status === "update") {
+              setUpdateResult(
+                data.message + ' <a href="' + data.releases_url +
+                '" target="_blank" rel="noopener">Open download page</a>'
+              );
+            } else if (data.status === "current") {
+              setUpdateResult(data.message);
+            } else {
+              setUpdateResult(data.message || "Update check failed.");
+            }
+          })
+          .catch(function () {
+            setUpdateResult("Update check failed. Try again in a moment.");
+          })
+          .finally(function () {
+            checkBtn.disabled = false;
+          });
+      });
 
       probe();
     })();

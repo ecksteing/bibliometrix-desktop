@@ -92,7 +92,7 @@ This will:
 1. Bake `bibliometrix` (CRAN binaries) into `R-Portable` via `scripts/bake_packages.R`
 2. Trim non-runtime docs/tests/Tcl trees via `scripts/trim_r_portable.ps1`
 3. Compile the onedir launcher with PyInstaller (`--onedir --noconsole`) and stage `run_bibliometrix.exe` + `_internal\` at the repo root
-4. Compile `installer_config.iss` into `Output\BibliometrixSetup_<version>.exe`
+4. Compile `installer_config.iss` into `Output\BibliometrixDesktopSetup_<version>.exe`
 
 Useful flags:
 
