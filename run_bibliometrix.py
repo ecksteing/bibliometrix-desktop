@@ -10,6 +10,7 @@ import socket
 import sys
 import subprocess
 import threading
+import time
 import traceback
 import webbrowser
 from datetime import datetime
@@ -198,11 +199,73 @@ def port_is_listening(port: int = SHINY_PORT) -> bool:
 
 
 def shiny_http_reachable(port: int = SHINY_PORT) -> bool:
+    """
+    True if something on the Shiny port answers HTTP.
+    Uses a raw socket: urllib often fails against httpuv even when the app is up.
+    """
     try:
-        with urlopen(shiny_url(port), timeout=1.5) as response:
-            return 200 <= getattr(response, "status", 200) < 500
-    except Exception:
+        with socket.create_connection((SHINY_HOST, port), timeout=2.0) as sock:
+            sock.settimeout(2.0)
+            sock.sendall(
+                b"GET / HTTP/1.0\r\n"
+                b"Host: 127.0.0.1\r\n"
+                b"Connection: close\r\n"
+                b"\r\n"
+            )
+            chunks: list[bytes] = []
+            while True:
+                try:
+                    data = sock.recv(2048)
+                except socket.timeout:
+                    break
+                if not data:
+                    break
+                chunks.append(data)
+                joined = b"".join(chunks)
+                if b"HTTP/" in joined or len(joined) >= 32:
+                    return True
+            return bool(chunks)
+    except OSError:
         return False
+
+
+def process_image_path(pid: int) -> Path | None:
+    """Return the executable path for a PID (Windows), or None."""
+    if sys.platform != "win32" or pid <= 0:
+        return None
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+        if not handle:
+            return None
+        try:
+            buf = ctypes.create_unicode_buffer(32768)
+            size = wintypes.DWORD(len(buf))
+            query = getattr(kernel32, "QueryFullProcessImageNameW")
+            if query(handle, 0, buf, ctypes.byref(size)):
+                return Path(buf.value)
+        finally:
+            kernel32.CloseHandle(handle)
+    except Exception:
+        return None
+    return None
+
+
+def pids_belong_to_install(pids: set[int], base_dir: Path) -> bool:
+    """True if any PID is an executable under this install folder."""
+    root = str(base_dir.resolve()).rstrip("\\").lower()
+    for pid in pids:
+        image = process_image_path(pid)
+        if image is None:
+            continue
+        path = str(image).rstrip("\\").lower()
+        if path == root or path.startswith(root + "\\"):
+            return True
+    return False
 
 
 def open_shiny_in_browser(port: int = SHINY_PORT) -> None:
@@ -331,26 +394,35 @@ def kill_pids(pids: set[int]) -> None:
             log(f"Could not stop PID {pid}: {exc}")
 
 
-def prepare_shiny_port(port: int = SHINY_PORT) -> bool:
+def prepare_shiny_port(port: int = SHINY_PORT, base_dir: Path | None = None) -> bool:
     """
     If Biblioshiny is already running, reopen the browser and return True
     (caller should exit). Otherwise free a stuck port if needed and return False.
     """
-    if shiny_http_reachable(port):
-        log(f"Biblioshiny already running at {shiny_url(port)}; reopening browser.")
+    for attempt in range(3):
+        if shiny_http_reachable(port):
+            log(f"Biblioshiny already running at {shiny_url(port)}; reopening browser.")
+            open_shiny_in_browser(port)
+            return True
+        if attempt < 2 and port_is_listening(port):
+            time.sleep(0.4)
+
+    if not port_is_listening(port):
+        return False
+
+    holders = pids_listening_on_port(port)
+    if base_dir is not None and pids_belong_to_install(holders, base_dir):
+        # httpuv often fails a strict HTTP client while the app is still healthy.
+        log(
+            f"Port {port} is held by this install; reopening {shiny_url(port)} "
+            "instead of restarting R."
+        )
         open_shiny_in_browser(port)
         return True
 
-    if port_is_listening(port):
-        log(f"Port {port} is in use but Biblioshiny is not responding; freeing it.")
-        kill_pids(pids_listening_on_port(port))
-        # Brief pause so Windows releases the socket.
-        try:
-            import time
-
-            time.sleep(1.0)
-        except Exception:
-            pass
+    log(f"Port {port} is in use but Biblioshiny is not responding; freeing it.")
+    kill_pids(holders)
+    time.sleep(1.0)
     return False
 
 
@@ -416,6 +488,8 @@ def start_application(base_dir: Path) -> int:
     log(f"R_LIBS_USER={user_lib}")
 
     loading_server = open_loading_page(base_dir, SHINY_PORT, current_version=get_local_version(base_dir))
+    session_started = False
+    session_failed_bind = False
 
     try:
         rotate_logs_if_needed()
@@ -423,16 +497,35 @@ def start_application(base_dir: Path) -> int:
             fh.write(
                 f"\n----- R session {datetime.now().isoformat(timespec='seconds')} -----\n"
             )
-            result = subprocess.run(
+            fh.flush()
+            proc = subprocess.Popen(
                 [str(rscript_path), "--vanilla", str(r_script)],
                 cwd=str(base_dir),
                 env=env,
                 startupinfo=startupinfo,
                 creationflags=creationflags,
-                stdout=fh,
+                stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
             )
+
+            def _pump_r_output() -> None:
+                nonlocal session_started, session_failed_bind
+                assert proc.stdout is not None
+                for line in proc.stdout:
+                    fh.write(line)
+                    fh.flush()
+                    if "Listening on http://" in line or "Starting Biblioshiny" in line:
+                        session_started = True
+                    lower = line.lower()
+                    if "address already in use" in lower or "failed to create server" in lower:
+                        session_failed_bind = True
+                proc.stdout.close()
+
+            pump = threading.Thread(target=_pump_r_output, daemon=True)
+            pump.start()
+            result = proc.wait()
+            pump.join(timeout=5)
     except OSError as exc:
         show_message(
             f"Could not start R:\n{exc}\n\nDetails were written to:\n{log_path()}",
@@ -447,17 +540,9 @@ def start_application(base_dir: Path) -> int:
                 pass
 
     if result.returncode != 0:
-        # Shiny/httpuv commonly exits non-zero when the user closes the app.
-        # If the server bound a port, the launch itself succeeded.
-        try:
-            log_text = log_path().read_text(encoding="utf-8", errors="replace")
-        except OSError:
-            log_text = ""
-        session_marker = "----- R session "
-        latest = log_text.rsplit(session_marker, 1)[-1] if session_marker in log_text else log_text
-        started = "Listening on http://" in latest or "Starting Biblioshiny..." in latest
-        failed_bind = "address already in use" in latest or "Failed to create server" in latest
-        if started and not failed_bind:
+        # Shiny/httpuv commonly exits non-zero when the browser closes or a
+        # later launch stops this R process. That is not a failed start.
+        if session_started and not session_failed_bind:
             log(
                 f"R exited with code {result.returncode} after Biblioshiny started; "
                 "treating as a normal shutdown."
@@ -483,7 +568,7 @@ def main() -> int:
     check_for_wrapper_updates(current_version)
 
     # Closing the browser tab does not stop Shiny; reopen or free port 3838.
-    if prepare_shiny_port(SHINY_PORT):
+    if prepare_shiny_port(SHINY_PORT, base_dir=base_dir):
         return 0
 
     return start_application(base_dir)
