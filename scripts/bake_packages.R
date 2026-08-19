@@ -89,7 +89,7 @@ tryCatch({
       warning(
         "Bundled bibliometrix ", ver, " is behind CRAN source ", src_ver, ".\n",
         "CRAN has no newer Windows binary for this R (", R.version.string, ").\n",
-        "Upgrade R-Portable to a current R 4.4/4.5 build, then re-run this script ",
+        "Upgrade R-Portable to a current R release, then re-run this script ",
         "to ship a newer bibliometrix without requiring Rtools for end users.",
         call. = FALSE
       )

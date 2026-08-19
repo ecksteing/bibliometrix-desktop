@@ -1,6 +1,6 @@
 # Bibliometrix Desktop
 
-An easy way to run [Bibliometrix](https://github.com/massimoaria/bibliometrix) on Windows. ➡️ [Install Bibliometrix Desktop](https://github.com/ecksteing/bibliometrix-desktop/releases) and run. No separate R or Rtools needed.
+An easy way to run [Bibliometrix / Biblioshiny](https://github.com/massimoaria/bibliometrix) on Windows. ➡️ [Install Bibliometrix Desktop](https://github.com/ecksteing/bibliometrix-desktop/releases) and run. No separate R or Rtools needed.
 
 > **Platform note:** The current release targets **Windows x64**. macOS and Linux packaging are planned for later.
 
@@ -42,6 +42,10 @@ No. The installer includes everything you need to run Bibliometrix/Biblioshiny.
 
 Yes. This app launches official Bibliometrix / Biblioshiny.
 
+#### Does this app open Bibliometrix or Biblioshiny?
+
+Both. Biblioshiny is the GUI version of Bibliometrix. With Biblioshiny you use your mouse, with Bibliometrix you use scripts. This app opens Biblioshiny, which has Bibliometrix under the hood.
+
 #### The app is sometimes slow to load?
 
 Yes. This is a powerful application. It may take a short while to open in your Browser,
@@ -77,7 +81,7 @@ End users can ignore this section.
 - Windows x64
 - [Python 3](https://www.python.org/) + `pip install -r requirements-build.txt`
 - [Inno Setup 6+](https://jrsoftware.org/isinfo.php) (per-user or machine-wide install)
-- Portable R under `R-Portable\` (PortableApps-style layout). Use a **current R 4.4/4.5** Windows build so CRAN still publishes recent `bibliometrix` binaries. Older R (e.g. 4.2.0) can only bake older binary package versions.
+- Portable R under `R-Portable\`. Use a **current R release** (currently 4.6.x) so CRAN still publishes recent `bibliometrix` binaries. Older R versions eventually stop receiving new binary packages.
 
 ### One-shot Windows build
 
