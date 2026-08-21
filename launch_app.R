@@ -231,24 +231,69 @@ wrap_loading_splash <- function(app) {
 
 # Stop the server when the browser session ends so R does not linger and lock files.
 # A short delay avoids quitting during a normal page refresh.
+# Also accept a /bibdesk-shutdown beacon from pagehide for browsers that drop
+# the websocket without a clean Shiny session end.
 wrap_stop_when_browser_closes <- function(app) {
+  schedule_stop <- function(reason) {
+    message(reason)
+    if (requireNamespace("later", quietly = TRUE)) {
+      later::later(function() {
+        message("Stopping Biblioshiny.")
+        shiny::stopApp()
+      }, delay = 2)
+    } else {
+      shiny::stopApp()
+    }
+  }
+
   original <- app$serverFuncSource
   app$serverFuncSource <- function() {
     server <- original()
     function(input, output, session) {
       session$onSessionEnded(function() {
-        if (requireNamespace("later", quietly = TRUE)) {
-          later::later(function() {
-            message("Browser session ended; stopping Biblioshiny.")
-            shiny::stopApp()
-          }, delay = 2)
-        } else {
-          message("Browser session ended; stopping Biblioshiny.")
-          shiny::stopApp()
-        }
+        schedule_stop("Browser session ended; stopping Biblioshiny.")
       })
       server(input, output, session)
     }
+  }
+
+  shutdown_handler <- function(req) {
+    if (!identical(req$PATH_INFO, "/bibdesk-shutdown")) {
+      return(NULL)
+    }
+    schedule_stop("Browser pagehide beacon received; stopping Biblioshiny.")
+    list(
+      status = 204L,
+      headers = list("Content-Type" = "text/plain"),
+      body = ""
+    )
+  }
+  app$httpHandlers <- c(list(shutdown_handler), app$httpHandlers)
+
+  original_ui <- app$ui
+  app$ui <- function(request) {
+    ui <- if (is.function(original_ui)) original_ui(request) else original_ui
+    shiny::tagList(
+      shiny::tags$script(shiny::HTML("
+        (function () {
+          var sent = false;
+          function notifyClose() {
+            if (sent) return;
+            sent = true;
+            try {
+              if (navigator.sendBeacon) {
+                navigator.sendBeacon('/bibdesk-shutdown');
+              } else {
+                fetch('/bibdesk-shutdown', { method: 'POST', keepalive: true });
+              }
+            } catch (e) {}
+          }
+          window.addEventListener('pagehide', notifyClose);
+          window.addEventListener('beforeunload', notifyClose);
+        })();
+      ")),
+      ui
+    )
   }
   app
 }

@@ -229,45 +229,6 @@ def shiny_http_reachable(port: int = SHINY_PORT) -> bool:
         return False
 
 
-def process_image_path(pid: int) -> Path | None:
-    """Return the executable path for a PID (Windows), or None."""
-    if sys.platform != "win32" or pid <= 0:
-        return None
-    try:
-        import ctypes
-        from ctypes import wintypes
-
-        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
-        kernel32 = ctypes.windll.kernel32
-        handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
-        if not handle:
-            return None
-        try:
-            buf = ctypes.create_unicode_buffer(32768)
-            size = wintypes.DWORD(len(buf))
-            query = getattr(kernel32, "QueryFullProcessImageNameW")
-            if query(handle, 0, buf, ctypes.byref(size)):
-                return Path(buf.value)
-        finally:
-            kernel32.CloseHandle(handle)
-    except Exception:
-        return None
-    return None
-
-
-def pids_belong_to_install(pids: set[int], base_dir: Path) -> bool:
-    """True if any PID is an executable under this install folder."""
-    root = str(base_dir.resolve()).rstrip("\\").lower()
-    for pid in pids:
-        image = process_image_path(pid)
-        if image is None:
-            continue
-        path = str(image).rstrip("\\").lower()
-        if path == root or path.startswith(root + "\\"):
-            return True
-    return False
-
-
 def open_shiny_in_browser(port: int = SHINY_PORT) -> None:
     webbrowser.open(shiny_url(port))
 
@@ -396,9 +357,11 @@ def kill_pids(pids: set[int]) -> None:
 
 def prepare_shiny_port(port: int = SHINY_PORT, base_dir: Path | None = None) -> bool:
     """
-    If Biblioshiny is already running, reopen the browser and return True
-    (caller should exit). Otherwise free a stuck port if needed and return False.
+    If Biblioshiny is already running and answering HTTP, reopen the browser and
+    return True (caller should exit). If the port is stuck/zombie (common after
+    closing the browser tab), free it and return False so a fresh R can start.
     """
+    del base_dir  # reserved for future install-scoped checks; unused for now
     for attempt in range(3):
         if shiny_http_reachable(port):
             log(f"Biblioshiny already running at {shiny_url(port)}; reopening browser.")
@@ -410,17 +373,9 @@ def prepare_shiny_port(port: int = SHINY_PORT, base_dir: Path | None = None) -> 
     if not port_is_listening(port):
         return False
 
+    # Listening but not answering HTTP: treat as a leftover R after the tab closed.
     holders = pids_listening_on_port(port)
-    if base_dir is not None and pids_belong_to_install(holders, base_dir):
-        # httpuv often fails a strict HTTP client while the app is still healthy.
-        log(
-            f"Port {port} is held by this install; reopening {shiny_url(port)} "
-            "instead of restarting R."
-        )
-        open_shiny_in_browser(port)
-        return True
-
-    log(f"Port {port} is in use but Biblioshiny is not responding; freeing it.")
+    log(f"Port {port} is stuck after a previous session; freeing it for a clean restart.")
     kill_pids(holders)
     time.sleep(1.0)
     return False
@@ -490,6 +445,7 @@ def start_application(base_dir: Path) -> int:
     loading_server = open_loading_page(base_dir, SHINY_PORT, current_version=get_local_version(base_dir))
     session_started = False
     session_failed_bind = False
+    returncode = 1
 
     try:
         rotate_logs_if_needed()
@@ -524,7 +480,7 @@ def start_application(base_dir: Path) -> int:
 
             pump = threading.Thread(target=_pump_r_output, daemon=True)
             pump.start()
-            result = proc.wait()
+            returncode = proc.wait()
             pump.join(timeout=5)
     except OSError as exc:
         show_message(
@@ -539,23 +495,23 @@ def start_application(base_dir: Path) -> int:
             except Exception:
                 pass
 
-    if result.returncode != 0:
+    if returncode != 0:
         # Shiny/httpuv commonly exits non-zero when the browser closes or a
         # later launch stops this R process. That is not a failed start.
         if session_started and not session_failed_bind:
             log(
-                f"R exited with code {result.returncode} after Biblioshiny started; "
+                f"R exited with code {returncode} after Biblioshiny started; "
                 "treating as a normal shutdown."
             )
             return 0
 
         show_message(
             "Bibliometrix failed to start.\n\n"
-            f"Exit code: {result.returncode}\n"
+            f"Exit code: {returncode}\n"
             f"See the log for details:\n{log_path()}",
             error=True,
         )
-        return result.returncode
+        return returncode
 
     log("R session finished successfully.")
     return 0
