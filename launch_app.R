@@ -29,6 +29,9 @@ if (is.na(user_lib) || !nzchar(user_lib)) {
   }
 }
 dir.create(user_lib, recursive = TRUE, showWarnings = FALSE)
+tryCatch({
+  user_lib <- utils::shortPathName(user_lib)
+}, error = function(e) invisible(NULL))
 app_data_dir <- dirname(user_lib)
 dir.create(app_data_dir, recursive = TRUE, showWarnings = FALSE)
 cran_check_stamp_path <- file.path(app_data_dir, "cran_update_check.txt")
@@ -234,13 +237,21 @@ wrap_loading_splash <- function(app) {
 # Also accept a /bibdesk-shutdown beacon from pagehide for browsers that drop
 # the websocket without a clean Shiny session end.
 wrap_stop_when_browser_closes <- function(app) {
+  # Active sessions counter to prevent accidental shutdown during tab reload/sleep
+  active_sessions <- 0L
+
   schedule_stop <- function(reason) {
     message(reason)
     if (requireNamespace("later", quietly = TRUE)) {
+      # 60-second grace period: gives ample time for tab reloads (F5) or waking from browser tab sleep
       later::later(function() {
-        message("Stopping Biblioshiny.")
-        shiny::stopApp()
-      }, delay = 2)
+        if (active_sessions <= 0L) {
+          message("No active browser sessions after grace period; stopping Biblioshiny.")
+          shiny::stopApp()
+        } else {
+          message("Active session reconnected; keeping Biblioshiny running.")
+        }
+      }, delay = 60)
     } else {
       shiny::stopApp()
     }
@@ -250,8 +261,12 @@ wrap_stop_when_browser_closes <- function(app) {
   app$serverFuncSource <- function() {
     server <- original()
     function(input, output, session) {
+      active_sessions <<- active_sessions + 1L
       session$onSessionEnded(function() {
-        schedule_stop("Browser session ended; stopping Biblioshiny.")
+        active_sessions <<- max(0L, active_sessions - 1L)
+        if (active_sessions <= 0L) {
+          schedule_stop("Browser session ended; starting 60s shutdown grace period.")
+        }
       })
       server(input, output, session)
     }
@@ -261,7 +276,9 @@ wrap_stop_when_browser_closes <- function(app) {
     if (!identical(req$PATH_INFO, "/bibdesk-shutdown")) {
       return(NULL)
     }
-    schedule_stop("Browser pagehide beacon received; stopping Biblioshiny.")
+    if (active_sessions <= 1L) {
+      schedule_stop("Browser pagehide beacon received; starting 60s shutdown grace period.")
+    }
     list(
       status = 204L,
       headers = list("Content-Type" = "text/plain"),
@@ -319,17 +336,8 @@ run_biblioshiny_desktop <- function(host, port, launch_browser = FALSE) {
   )
 }
 
-if (isTRUE(enable_runtime_updates)) {
-  if (should_run_cran_update_check()) {
-    update_bibliometrix_from_cran()
-  } else {
-    message(
-      "Skipping CRAN update check (last successful check within ",
-      update_check_interval_days,
-      " days)."
-    )
-  }
-}
+# Note: Runtime CRAN update check is now decoupled and run asynchronously in the
+# background by check_update_background.R to prevent launch delays.
 
 ensure_bibliometrix_installed()
 message("Using bibliometrix ", installed_bibliometrix_version())

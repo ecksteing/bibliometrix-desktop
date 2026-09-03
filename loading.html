@@ -147,6 +147,7 @@
         updateResultEl.innerHTML = html;
       }
 
+      var probeDelay = 300;
       function probe() {
         setStatus("Waiting for Biblioshiny…");
         fetch(target, { method: "GET", mode: "no-cors", cache: "no-store" })
@@ -155,7 +156,8 @@
             window.location.replace(target);
           })
           .catch(function () {
-            setTimeout(probe, 700);
+            setTimeout(probe, probeDelay);
+            if (probeDelay < 600) { probeDelay += 100; }
           });
       }
 

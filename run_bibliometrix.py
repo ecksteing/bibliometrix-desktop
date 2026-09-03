@@ -60,6 +60,15 @@ def get_user_lib_dir() -> Path:
         root = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share"))
     lib_dir = root / APP_NAME / "R_library"
     lib_dir.mkdir(parents=True, exist_ok=True)
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            buf = ctypes.create_unicode_buffer(500)
+            ret = ctypes.windll.kernel32.GetShortPathNameW(str(lib_dir), buf, 500)
+            if ret > 0:
+                return Path(buf.value)
+        except Exception:
+            pass
     return lib_dir
 
 
@@ -188,6 +197,16 @@ def check_for_wrapper_updates(current_version: str) -> None:
         webbrowser.open(RELEASES_URL)
 
 
+def check_for_wrapper_updates_async(current_version: str) -> None:
+    """Run the GitHub wrapper update check without blocking startup."""
+    threading.Thread(
+        target=check_for_wrapper_updates,
+        args=(current_version,),
+        daemon=True,
+        name="wrapper-update-check",
+    ).start()
+
+
 def shiny_url(port: int = SHINY_PORT) -> str:
     return f"http://{SHINY_HOST}:{port}"
 
@@ -234,7 +253,10 @@ def open_shiny_in_browser(port: int = SHINY_PORT) -> None:
 
 
 def open_loading_page(
-    base_dir: Path, shiny_port: int = SHINY_PORT, current_version: str = "0.0.0"
+    base_dir: Path,
+    shiny_port: int = SHINY_PORT,
+    loading_port: int = LOADING_PORT,
+    current_version: str = "0.0.0",
 ) -> ThreadingHTTPServer | None:
     """
     Serve a small local loading page and open it in the browser while R starts.
@@ -281,15 +303,15 @@ def open_loading_page(
             return
 
     try:
-        server = ThreadingHTTPServer((SHINY_HOST, LOADING_PORT), LoadingHandler)
+        server = ThreadingHTTPServer((SHINY_HOST, loading_port), LoadingHandler)
     except OSError as exc:
-        log(f"Could not start loading page server on {LOADING_PORT}: {exc}")
+        log(f"Could not start loading page server on {loading_port}: {exc}")
         return None
 
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     target = quote(shiny_url(shiny_port), safe=":/")
-    loading_url = f"http://{SHINY_HOST}:{LOADING_PORT}/?target={target}"
+    loading_url = f"http://{SHINY_HOST}:{loading_port}/?target={target}"
     log(f"Opening loading page: {loading_url}")
     webbrowser.open(loading_url)
     return server
@@ -301,8 +323,64 @@ def _creationflags_no_window() -> int:
     return 0
 
 
+def _pids_listening_on_port_ctypes(port: int) -> set[int] | None:
+    """Fast Windows API call to list PIDs listening on a port without spawning netstat."""
+    if sys.platform != "win32":
+        return None
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        class MIB_TCPROW_OWNER_PID(ctypes.Structure):
+            _fields_ = [
+                ("dwState", wintypes.DWORD),
+                ("dwLocalAddr", wintypes.DWORD),
+                ("dwLocalPort", wintypes.DWORD),
+                ("dwRemoteAddr", wintypes.DWORD),
+                ("dwRemotePort", wintypes.DWORD),
+                ("dwOwningPid", wintypes.DWORD),
+            ]
+
+        TCP_TABLE_OWNER_PID_ALL = 5
+        AF_INET = 2
+        MIB_TCP_STATE_LISTEN = 2
+
+        iphlpapi = ctypes.windll.iphlpapi
+        size = wintypes.DWORD(0)
+        iphlpapi.GetExtendedTcpTable(
+            None, ctypes.byref(size), True, AF_INET, TCP_TABLE_OWNER_PID_ALL, 0
+        )
+        if size.value <= 0:
+            return None
+        buf = ctypes.create_string_buffer(size.value)
+        ret = iphlpapi.GetExtendedTcpTable(
+            buf, ctypes.byref(size), True, AF_INET, TCP_TABLE_OWNER_PID_ALL, 0
+        )
+        if ret != 0:
+            return None
+
+        num_entries = ctypes.cast(buf, ctypes.POINTER(wintypes.DWORD)).contents.value
+        row_size = ctypes.sizeof(MIB_TCPROW_OWNER_PID)
+        offset = 4
+        pids: set[int] = set()
+        for _ in range(num_entries):
+            row = MIB_TCPROW_OWNER_PID.from_buffer(buf, offset)
+            offset += row_size
+            if row.dwState == MIB_TCP_STATE_LISTEN:
+                row_port = socket.ntohs(row.dwLocalPort)
+                if row_port == port:
+                    pids.add(int(row.dwOwningPid))
+        return pids
+    except Exception:
+        return None
+
+
 def pids_listening_on_port(port: int = SHINY_PORT) -> set[int]:
     """Return PIDs with a TCP LISTENING socket on port (Windows)."""
+    fast_pids = _pids_listening_on_port_ctypes(port)
+    if fast_pids is not None:
+        return fast_pids
+
     if sys.platform != "win32":
         return set()
     try:
@@ -334,6 +412,173 @@ def pids_listening_on_port(port: int = SHINY_PORT) -> set[int]:
         except ValueError:
             continue
     return pids
+
+
+def find_free_port(
+    preferred: int = SHINY_PORT,
+    near_min: int = 3838,
+    near_max: int = 3888,
+    fallback_min: int = 38000,
+    fallback_max: int = 39000,
+) -> int:
+    """Return preferred port if free, otherwise scan nearby then ephemeral ranges."""
+    if not port_is_listening(preferred):
+        return preferred
+    for port in range(near_min, near_max + 1):
+        if not port_is_listening(port):
+            log(f"Shiny port {preferred} busy; using {port}.")
+            return port
+    for port in range(fallback_min, fallback_max + 1):
+        if not port_is_listening(port):
+            log(f"Shiny port {preferred} busy; using ephemeral port {port}.")
+            return port
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind((SHINY_HOST, 0))
+        chosen = s.getsockname()[1]
+        log(f"Shiny port {preferred} busy; OS assigned port {chosen}.")
+        return chosen
+
+
+def find_free_loading_port(preferred: int = LOADING_PORT) -> int:
+    if not port_is_listening(preferred):
+        return preferred
+    for port in range(3830, 3850):
+        if not port_is_listening(port):
+            log(f"Loading page port {preferred} busy; using {port}.")
+            return port
+    for port in range(38000, 39000):
+        if not port_is_listening(port):
+            log(f"Loading page port {preferred} busy; using ephemeral port {port}.")
+            return port
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind((SHINY_HOST, 0))
+        chosen = s.getsockname()[1]
+        log(f"Loading page port {preferred} busy; OS assigned port {chosen}.")
+        return chosen
+
+
+def wait_for_shiny_ready(port: int, timeout: float = 300.0, poll_interval: float = 0.5) -> bool:
+    """Poll socket connectivity until Shiny answers HTTP or timeout elapses."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if shiny_http_reachable(port):
+            return True
+        time.sleep(poll_interval)
+    return False
+
+
+def create_job_object() -> int | None:
+    """Create a Windows Job Object configured to kill child processes when closed."""
+    if sys.platform != "win32":
+        return None
+    try:
+        import ctypes
+        from ctypes import wintypes
+        kernel32 = ctypes.windll.kernel32
+        h_job = kernel32.CreateJobObjectW(None, None)
+        if not h_job:
+            return None
+
+        class IO_COUNTERS(ctypes.Structure):
+            _fields_ = [
+                ("ReadOperationCount", ctypes.c_uint64),
+                ("WriteOperationCount", ctypes.c_uint64),
+                ("OtherOperationCount", ctypes.c_uint64),
+                ("ReadTransferCount", ctypes.c_uint64),
+                ("WriteTransferCount", ctypes.c_uint64),
+                ("OtherTransferCount", ctypes.c_uint64),
+            ]
+
+        class JOBOBJECT_BASIC_LIMIT_INFORMATION(ctypes.Structure):
+            _fields_ = [
+                ("PerProcessUserTimeLimit", ctypes.c_int64),
+                ("PerJobUserTimeLimit", ctypes.c_int64),
+                ("LimitFlags", wintypes.DWORD),
+                ("MinimumWorkingSetSize", ctypes.c_size_t),
+                ("MaximumWorkingSetSize", ctypes.c_size_t),
+                ("ActiveProcessLimit", wintypes.DWORD),
+                ("Affinity", ctypes.c_size_t),
+                ("PriorityClass", wintypes.DWORD),
+                ("SchedulingClass", wintypes.DWORD),
+            ]
+
+        class JOBOBJECT_EXTENDED_LIMIT_INFORMATION(ctypes.Structure):
+            _fields_ = [
+                ("BasicLimitInformation", JOBOBJECT_BASIC_LIMIT_INFORMATION),
+                ("IoInfo", IO_COUNTERS),
+                ("ProcessMemoryLimit", ctypes.c_size_t),
+                ("JobMemoryLimit", ctypes.c_size_t),
+                ("PeakProcessMemoryLimit", ctypes.c_size_t),
+                ("PeakJobMemoryLimit", ctypes.c_size_t),
+            ]
+
+        info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION()
+        JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x2000
+        info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+        JobObjectExtendedLimitInformation = 9
+        res = kernel32.SetInformationJobObject(
+            h_job,
+            JobObjectExtendedLimitInformation,
+            ctypes.byref(info),
+            ctypes.sizeof(info),
+        )
+        if res:
+            return h_job
+    except Exception as exc:
+        log(f"Job Object creation failed: {exc}")
+    return None
+
+
+def assign_process_to_job(h_job: int | None, proc: subprocess.Popen) -> None:
+    """Assign a subprocess to the Windows Job Object."""
+    if h_job and sys.platform == "win32":
+        try:
+            import ctypes
+            proc_handle = getattr(proc, "_handle", None)
+            if proc_handle:
+                kernel32 = ctypes.windll.kernel32
+                kernel32.AssignProcessToJobObject(h_job, int(proc_handle))
+        except Exception as exc:
+            log(f"AssignProcessToJobObject failed: {exc}")
+
+
+def launch_background_cran_check(base_dir: Path) -> None:
+    """Run CRAN update check asynchronously in the background with low CPU priority."""
+    rscript = find_rscript(base_dir)
+    if not rscript:
+        return
+
+    script = base_dir / "check_update_background.R"
+    if not script.is_file():
+        script = base_dir / "scripts" / "check_update_background.R"
+    if not script.is_file():
+        return
+
+    env = os.environ.copy()
+    user_lib = str(get_user_lib_dir())
+    env["R_LIBS_USER"] = user_lib
+    existing = env.get("R_LIBS", "")
+    env["R_LIBS"] = user_lib if not existing else f"{user_lib}{os.pathsep}{existing}"
+
+    creationflags = 0
+    if sys.platform == "win32":
+        creationflags = (
+            getattr(subprocess, "CREATE_NO_WINDOW", 0)
+            | getattr(subprocess, "BELOW_NORMAL_PRIORITY_CLASS", 0x00004000)
+        )
+
+    try:
+        log("Launching detached background CRAN update worker...")
+        subprocess.Popen(
+            [str(rscript), "--vanilla", str(script)],
+            cwd=str(base_dir),
+            env=env,
+            creationflags=creationflags,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except Exception as exc:
+        log(f"Could not launch background CRAN worker: {exc}")
 
 
 def kill_pids(pids: set[int]) -> None:
@@ -400,7 +645,7 @@ def find_rscript(base_dir: Path) -> Path | None:
     return None
 
 
-def start_application(base_dir: Path) -> int:
+def start_application(base_dir: Path, shiny_port: int, loading_port: int) -> int:
     rscript_path = find_rscript(base_dir)
     r_script = base_dir / "launch_app.R"
 
@@ -428,7 +673,7 @@ def start_application(base_dir: Path) -> int:
     existing = env.get("R_LIBS", "")
     env["R_LIBS"] = user_lib if not existing else f"{user_lib}{os.pathsep}{existing}"
     env["BIBDESK_SHINY_HOST"] = SHINY_HOST
-    env["BIBDESK_SHINY_PORT"] = str(SHINY_PORT)
+    env["BIBDESK_SHINY_PORT"] = str(shiny_port)
     # Browser is opened by the Python loading page; R should not open a second tab.
     env["BIBDESK_LAUNCH_BROWSER"] = "0"
 
@@ -441,11 +686,18 @@ def start_application(base_dir: Path) -> int:
 
     log(f"Starting: {rscript_path} {r_script}")
     log(f"R_LIBS_USER={user_lib}")
+    log(f"Shiny port={shiny_port} loading port={loading_port}")
 
-    loading_server = open_loading_page(base_dir, SHINY_PORT, current_version=get_local_version(base_dir))
+    loading_server = open_loading_page(
+        base_dir,
+        shiny_port=shiny_port,
+        loading_port=loading_port,
+        current_version=get_local_version(base_dir),
+    )
     session_started = False
     session_failed_bind = False
     returncode = 1
+    h_job = create_job_object()
 
     try:
         rotate_logs_if_needed()
@@ -464,24 +716,32 @@ def start_application(base_dir: Path) -> int:
                 stderr=subprocess.STDOUT,
                 text=True,
             )
+            assign_process_to_job(h_job, proc)
 
             def _pump_r_output() -> None:
-                nonlocal session_started, session_failed_bind
+                nonlocal session_failed_bind
                 assert proc.stdout is not None
                 for line in proc.stdout:
                     fh.write(line)
                     fh.flush()
-                    if "Listening on http://" in line or "Starting Biblioshiny" in line:
-                        session_started = True
                     lower = line.lower()
                     if "address already in use" in lower or "failed to create server" in lower:
                         session_failed_bind = True
                 proc.stdout.close()
 
-            pump = threading.Thread(target=_pump_r_output, daemon=True)
+            def _watch_shiny_ready() -> None:
+                nonlocal session_started
+                if wait_for_shiny_ready(shiny_port):
+                    session_started = True
+                    log(f"Biblioshiny is reachable on {shiny_url(shiny_port)}.")
+
+            pump = threading.Thread(target=_pump_r_output, daemon=True, name="r-log-pump")
+            ready = threading.Thread(target=_watch_shiny_ready, daemon=True, name="shiny-ready-watch")
             pump.start()
+            ready.start()
             returncode = proc.wait()
             pump.join(timeout=5)
+            ready.join(timeout=1)
     except OSError as exc:
         show_message(
             f"Could not start R:\n{exc}\n\nDetails were written to:\n{log_path()}",
@@ -521,13 +781,18 @@ def main() -> int:
     base_dir = get_base_dir()
     current_version = get_local_version(base_dir)
     log(f"Launcher start version={current_version} base_dir={base_dir}")
-    check_for_wrapper_updates(current_version)
 
-    # Closing the browser tab does not stop Shiny; reopen or free port 3838.
+    # Non-blocking: loading page and R start immediately while this runs in parallel.
+    check_for_wrapper_updates_async(current_version)
+
+    # Closing the browser tab does not stop Shiny; reopen or free the default port.
     if prepare_shiny_port(SHINY_PORT, base_dir=base_dir):
         return 0
 
-    return start_application(base_dir)
+    shiny_port = find_free_port(SHINY_PORT)
+    loading_port = find_free_loading_port(LOADING_PORT)
+    launch_background_cran_check(base_dir)
+    return start_application(base_dir, shiny_port, loading_port)
 
 
 if __name__ == "__main__":

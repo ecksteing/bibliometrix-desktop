@@ -15,7 +15,8 @@
 [CmdletBinding()]
 param(
     [switch]$SkipBake,
-    [switch]$SkipInstaller
+    [switch]$SkipInstaller,
+    [switch]$SkipOpenBLAS
 )
 
 $ErrorActionPreference = "Stop"
@@ -90,6 +91,12 @@ if (-not $SkipBake) {
     }
     Write-Host "==> Trimming non-runtime docs/tests/Tcl from R-Portable..."
     & powershell -ExecutionPolicy Bypass -File (Join-Path $Root "scripts\trim_r_portable.ps1")
+    if (-not $SkipOpenBLAS) {
+        Write-Host "==> Enabling OpenBLAS for faster matrix operations..."
+        & powershell -ExecutionPolicy Bypass -File (Join-Path $Root "scripts\enable_openblas.ps1")
+    } else {
+        Write-Host "==> Skipping OpenBLAS (-SkipOpenBLAS)"
+    }
 } else {
     Write-Host "==> Skipping package bake (-SkipBake)"
 }

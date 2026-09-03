@@ -56,6 +56,7 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 Source: "run_bibliometrix.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "_internal\*"; DestDir: "{app}\_internal"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "launch_app.R"; DestDir: "{app}"; Flags: ignoreversion
+Source: "check_update_background.R"; DestDir: "{app}"; Flags: ignoreversion
 Source: "loading.html"; DestDir: "{app}"; Flags: ignoreversion
 Source: "stop_bibliometrix.ps1"; DestDir: "{app}"; Flags: ignoreversion
 ; Also pack for ExtractTemporaryFile so upgrades use THIS script, not the old install's copy.
