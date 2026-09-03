@@ -16,7 +16,7 @@
 param(
     [switch]$SkipBake,
     [switch]$SkipInstaller,
-    [switch]$SkipOpenBLAS
+    [switch]$EnableOpenBLAS
 )
 
 $ErrorActionPreference = "Stop"
@@ -91,11 +91,12 @@ if (-not $SkipBake) {
     }
     Write-Host "==> Trimming non-runtime docs/tests/Tcl from R-Portable..."
     & powershell -ExecutionPolicy Bypass -File (Join-Path $Root "scripts\trim_r_portable.ps1")
-    if (-not $SkipOpenBLAS) {
-        Write-Host "==> Enabling OpenBLAS for faster matrix operations..."
+    if ($EnableOpenBLAS) {
+        Write-Host "==> Enabling OpenBLAS (optional; replaces Rblas.dll and Rlapack.dll)..."
         & powershell -ExecutionPolicy Bypass -File (Join-Path $Root "scripts\enable_openblas.ps1")
-    } else {
-        Write-Host "==> Skipping OpenBLAS (-SkipOpenBLAS)"
+        if ($LASTEXITCODE -ne 0) {
+            throw "enable_openblas.ps1 failed with exit code $LASTEXITCODE"
+        }
     }
 } else {
     Write-Host "==> Skipping package bake (-SkipBake)"
