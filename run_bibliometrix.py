@@ -542,6 +542,27 @@ def assign_process_to_job(h_job: int | None, proc: subprocess.Popen) -> None:
             log(f"AssignProcessToJobObject failed: {exc}")
 
 
+def close_job_object(h_job: int | None) -> None:
+    """Close the job handle; KILL_ON_JOB_CLOSE terminates any remaining members."""
+    if h_job and sys.platform == "win32":
+        try:
+            import ctypes
+
+            ctypes.windll.kernel32.CloseHandle(h_job)
+        except Exception as exc:
+            log(f"CloseHandle(job) failed: {exc}")
+
+
+def free_stale_session_ports(*ports: int) -> None:
+    """Kill processes still listening on session ports after R should have exited."""
+    time.sleep(0.5)
+    for port in ports:
+        holders = pids_listening_on_port(port)
+        if holders:
+            log(f"Cleaning leftover listeners on port {port}: {sorted(holders)}")
+            kill_pids(holders)
+
+
 def launch_background_cran_check(base_dir: Path) -> None:
     """Run CRAN update check asynchronously in the background with low CPU priority."""
     rscript = find_rscript(base_dir)
@@ -645,7 +666,9 @@ def find_rscript(base_dir: Path) -> Path | None:
     return None
 
 
-def start_application(base_dir: Path, shiny_port: int, loading_port: int) -> int:
+def start_application(
+    base_dir: Path, shiny_port: int, loading_port: int, h_job: int | None = None
+) -> int:
     rscript_path = find_rscript(base_dir)
     r_script = base_dir / "launch_app.R"
 
@@ -697,7 +720,9 @@ def start_application(base_dir: Path, shiny_port: int, loading_port: int) -> int
     session_started = False
     session_failed_bind = False
     returncode = 1
-    h_job = create_job_object()
+    if h_job is None:
+        h_job = create_job_object()
+    proc: subprocess.Popen | None = None
 
     try:
         rotate_logs_if_needed()
@@ -754,6 +779,11 @@ def start_application(base_dir: Path, shiny_port: int, loading_port: int) -> int
                 loading_server.shutdown()
             except Exception:
                 pass
+        if proc is not None and proc.poll() is None:
+            log("R process still running after wait(); stopping process tree.")
+            kill_pids({proc.pid})
+        free_stale_session_ports(shiny_port, loading_port)
+        close_job_object(h_job)
 
     if returncode != 0:
         # Shiny/httpuv commonly exits non-zero when the browser closes or a
@@ -791,8 +821,9 @@ def main() -> int:
 
     shiny_port = find_free_port(SHINY_PORT)
     loading_port = find_free_loading_port(LOADING_PORT)
+    h_job = create_job_object()
     launch_background_cran_check(base_dir)
-    return start_application(base_dir, shiny_port, loading_port)
+    return start_application(base_dir, shiny_port, loading_port, h_job=h_job)
 
 
 if __name__ == "__main__":

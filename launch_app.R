@@ -9,8 +9,9 @@
 #
 #
 # Lifecycle:
-#   Closing the browser session stops the Shiny server (after a short delay),
-#   so R does not keep locking files after the user is done.
+#   Closing the browser session stops the Shiny server (after a short grace period),
+#   so R does not keep locking files after the user is done. Override grace seconds
+#   with env BIBDESK_SHUTDOWN_GRACE_SEC (default 30).
 
 cran_repo <- "https://cloud.r-project.org"
 app_name <- "Bibliometrix Desktop"
@@ -237,21 +238,43 @@ wrap_loading_splash <- function(app) {
 # Also accept a /bibdesk-shutdown beacon from pagehide for browsers that drop
 # the websocket without a clean Shiny session end.
 wrap_stop_when_browser_closes <- function(app) {
-  # Active sessions counter to prevent accidental shutdown during tab reload/sleep
-  active_sessions <- 0L
+  # Mutable session state (env avoids <<- across handler closures).
+  state <- new.env(parent = emptyenv())
+  state$active_sessions <- 0L
+  # Set when the tab sends pagehide/beforeunload; stops even if the websocket
+  # lingers after the browser UI is gone (common cause of orphaned Rterm/R GUI).
+  state$force_shutdown <- FALSE
+  grace_sec <- suppressWarnings(
+    as.numeric(Sys.getenv("BIBDESK_SHUTDOWN_GRACE_SEC", unset = "30"))
+  )
+  if (is.na(grace_sec) || grace_sec < 5) {
+    grace_sec <- 30
+  }
+  state$grace_sec <- grace_sec
 
-  schedule_stop <- function(reason) {
+  schedule_stop <- function(reason, force = FALSE) {
+    if (isTRUE(force)) {
+      state$force_shutdown <- TRUE
+    }
     message(reason)
     if (requireNamespace("later", quietly = TRUE)) {
-      # 60-second grace period: gives ample time for tab reloads (F5) or waking from browser tab sleep
+      delay <- state$grace_sec
       later::later(function() {
-        if (active_sessions <= 0L) {
-          message("No active browser sessions after grace period; stopping Biblioshiny.")
+        if (state$active_sessions <= 0L || isTRUE(state$force_shutdown)) {
+          message(
+            "Stopping Biblioshiny after ",
+            delay,
+            "s grace (sessions=",
+            state$active_sessions,
+            ", forced=",
+            isTRUE(state$force_shutdown),
+            ")."
+          )
           shiny::stopApp()
         } else {
           message("Active session reconnected; keeping Biblioshiny running.")
         }
-      }, delay = 60)
+      }, delay = delay)
     } else {
       shiny::stopApp()
     }
@@ -261,11 +284,20 @@ wrap_stop_when_browser_closes <- function(app) {
   app$serverFuncSource <- function() {
     server <- original()
     function(input, output, session) {
-      active_sessions <<- active_sessions + 1L
+      state$active_sessions <- state$active_sessions + 1L
+      # Tab reload / reconnect within the grace window cancels a pending forced stop.
+      state$force_shutdown <- FALSE
       session$onSessionEnded(function() {
-        active_sessions <<- max(0L, active_sessions - 1L)
-        if (active_sessions <= 0L) {
-          schedule_stop("Browser session ended; starting 60s shutdown grace period.")
+        state$active_sessions <- max(0L, state$active_sessions - 1L)
+        if (state$active_sessions <= 0L) {
+          schedule_stop(
+            paste0(
+              "Browser session ended; starting ",
+              state$grace_sec,
+              "s shutdown grace period."
+            ),
+            force = FALSE
+          )
         }
       })
       server(input, output, session)
@@ -276,8 +308,15 @@ wrap_stop_when_browser_closes <- function(app) {
     if (!identical(req$PATH_INFO, "/bibdesk-shutdown")) {
       return(NULL)
     }
-    if (active_sessions <= 1L) {
-      schedule_stop("Browser pagehide beacon received; starting 60s shutdown grace period.")
+    if (state$active_sessions <= 1L) {
+      schedule_stop(
+        paste0(
+          "Browser pagehide beacon received; starting ",
+          state$grace_sec,
+          "s forced shutdown grace period."
+        ),
+        force = TRUE
+      )
     }
     list(
       status = 204L,
